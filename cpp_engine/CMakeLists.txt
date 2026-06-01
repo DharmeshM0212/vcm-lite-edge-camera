@@ -9,6 +9,7 @@ add_executable(vcm_lite_engine
     src/main.cpp
     src/metrics.cpp
     src/config.cpp
+    src/frame.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include)
