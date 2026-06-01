@@ -1,0 +1,13 @@
+build/
+*.exe
+*.obj
+*.o
+*.dll
+*.pdb
+*.ilk
+*.log
+__pycache__/
+.venv/
+.env
+logs/
+.vscode/
