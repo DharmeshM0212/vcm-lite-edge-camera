@@ -7,4 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(vcm_lite_engine
     src/main.cpp
+    src/metrics.cpp
 )
+
+target_include_directories(vcm_lite_engine PRIVATE include)
