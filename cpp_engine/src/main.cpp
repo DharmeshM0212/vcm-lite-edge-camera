@@ -1,10 +1,13 @@
+#include "config.hpp"
 #include "metrics.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <thread>
 
 int main() {
+    EngineConfig config = default_config();
     std::uint64_t frame_id = 0;
 
     while (true) {
@@ -18,7 +21,7 @@ int main() {
         metrics.ram_mb = 0.0;
         metrics.dropped_frames = 0;
         metrics.queue_depth = 0;
-        metrics.mode = "heartbeat";
+        metrics.mode = config.mode;
 
         std::cout << metrics_to_json(metrics) << std::endl;
 
