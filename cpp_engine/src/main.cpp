@@ -6,29 +6,52 @@
 #include "metrics.hpp"
 #include "roi.hpp"
 #include "semantic_encoder.hpp"
+#include "video_source.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <string>
 #include <thread>
 
-int main() {
+int main(int argc, char** argv) {
+    std::string video_path = "../assets/videos/input.mp4";
+
+    if (argc >= 2) {
+        video_path = argv[1];
+    }
+
+    VideoSource source(video_path);
+
+    if (!source.is_opened()) {
+        std::cerr << "failed_to_open_video:" << video_path << std::endl;
+        return 1;
+    }
+
     EngineConfig config = default_config();
     FrameQueue queue(3);
     std::atomic<bool> running(true);
-    std::atomic<std::uint64_t> produced_frames(0);
-    std::atomic<std::uint64_t> consumed_frames(0);
+
+    double source_fps = source.fps();
+
+    if (source_fps <= 1.0 || source_fps > 240.0) {
+        source_fps = 30.0;
+    }
+
+    int source_delay_ms = static_cast<int>(1000.0 / source_fps);
 
     std::thread producer([&]() {
-        std::uint64_t frame_id = 0;
-
         while (running.load()) {
-            Frame frame = make_synthetic_frame(frame_id, 640, 360, 3);
-            queue.push(std::move(frame));
-            produced_frames.store(frame_id + 1);
-            frame_id++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(33));
+            auto maybe_frame = source.read();
+
+            if (!maybe_frame.has_value()) {
+                running.store(false);
+                break;
+            }
+
+            queue.push(std::move(*maybe_frame));
+            std::this_thread::sleep_for(std::chrono::milliseconds(source_delay_ms));
         }
     });
 
@@ -37,12 +60,10 @@ int main() {
         std::uint64_t fps_window_count = 0;
         double measured_fps = 0.0;
 
-        while (running.load()) {
+        while (running.load() || queue.size() > 0) {
             auto maybe_frame = queue.pop();
 
             if (maybe_frame.has_value()) {
-                consumed_frames.store(maybe_frame->id + 1);
-
                 fps_window_count++;
                 auto fps_now = std::chrono::steady_clock::now();
                 auto fps_elapsed = std::chrono::duration<double>(fps_now - fps_window_start).count();
@@ -94,14 +115,13 @@ int main() {
                 metrics.mode = config.mode;
 
                 std::cout << metrics_to_json(metrics) << std::endl;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
         }
     });
-
-    std::this_thread::sleep_for(std::chrono::seconds(20));
-    running.store(false);
 
     producer.join();
     consumer.join();
