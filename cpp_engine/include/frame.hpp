@@ -14,3 +14,4 @@ struct Frame {
 };
 
 Frame make_empty_frame(std::uint64_t id, int width, int height, int channels);
+Frame make_synthetic_frame(std::uint64_t id, int width, int height, int channels);

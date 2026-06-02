@@ -20,7 +20,7 @@ int main() {
         std::uint64_t frame_id = 0;
 
         while (running.load()) {
-            Frame frame = make_empty_frame(frame_id, 640, 360, 3);
+            Frame frame = make_synthetic_frame(frame_id, 640, 360, 3);
             queue.push(std::move(frame));
             produced_frames.store(frame_id + 1);
             frame_id++;
