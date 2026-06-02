@@ -8,6 +8,7 @@ struct EngineMetrics {
     double fps;
     double latency_ms;
     double bitrate_kbps;
+    double mean_brightness;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;
