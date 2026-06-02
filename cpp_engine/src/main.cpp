@@ -3,6 +3,7 @@
 #include "frame_queue.hpp"
 #include "metrics.hpp"
 #include "image_statistics.hpp"
+#include "isp_tuning.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -47,7 +48,8 @@ int main() {
                     fps_window_count = 0;
                     fps_window_start = fps_now;
                 }
-                ImageStats stats = compute_image_stats(*maybe_frame);
+                Frame tuned_frame = apply_brightness_gain(*maybe_frame, 1.25);
+                ImageStats stats = compute_image_stats(tuned_frame);
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
                 metrics.fps = measured_fps;
@@ -57,7 +59,7 @@ int main() {
                 metrics.mean_brightness = stats.mean_brightness;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
-                metrics.ram_mb = static_cast<double>(maybe_frame->data.size()) / (1024.0 * 1024.0);
+                metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);
                 metrics.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());
                 metrics.queue_depth = static_cast<std::uint32_t>(queue.size());
                 metrics.mode = config.mode;
