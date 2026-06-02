@@ -8,7 +8,7 @@ double choose_brightness_gain(double mean_brightness) {
         return 1.6;
     }
 
-    if (mean_brightness < 110.0) {
+    if (mean_brightness < 130.0) {
         return 1.25;
     }
 

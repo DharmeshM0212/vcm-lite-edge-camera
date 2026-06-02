@@ -59,6 +59,7 @@ int main() {
                 metrics.latency_ms = std::chrono::duration<double, std::milli>(now - maybe_frame->created_at).count();
                 metrics.bitrate_kbps = 0.0;
                 metrics.mean_brightness = stats.mean_brightness;
+                metrics.brightness_gain = brightness_gain;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
                 metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);

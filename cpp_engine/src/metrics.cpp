@@ -12,6 +12,7 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"latency_ms\":" << metrics.latency_ms << ",";
     ss << "\"bitrate_kbps\":" << metrics.bitrate_kbps << ",";
     ss << "\"mean_brightness\":" << metrics.mean_brightness << ",";
+    ss << "\"brightness_gain\":" << metrics.brightness_gain << ",";
     ss << "\"ai_stability_loss\":" << metrics.ai_stability_loss << ",";
     ss << "\"cpu_percent\":" << metrics.cpu_percent << ",";
     ss << "\"ram_mb\":" << metrics.ram_mb << ",";
