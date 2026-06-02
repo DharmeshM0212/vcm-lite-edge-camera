@@ -15,6 +15,16 @@ struct EngineMetrics {
     double roi_area_ratio;
     std::uint32_t roi_quality;
     std::uint32_t context_quality;
+    std::uint32_t context_width;
+    std::uint32_t context_height;
+    std::uint32_t roi_tile_width;
+    std::uint32_t roi_tile_height;
+    std::uint32_t context_jpeg_bytes;
+    std::uint32_t roi_tile_jpeg_bytes;
+    std::uint32_t total_encoded_bytes;
+    std::uint32_t detector_interval;
+    bool reencode_allowed;
+    std::string controller_state;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;

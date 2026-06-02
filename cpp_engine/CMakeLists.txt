@@ -16,11 +16,13 @@ add_executable(vcm_lite_engine
     src/image_statistics.cpp
     src/isp_tuning.cpp
     src/roi.cpp
-    src/semantic_encoder.cpp
-    src/opencv_bridge.cpp
-    src/roi_packer.cpp
-    src/video_source.cpp
     src/motion_roi.cpp
+    src/roi_packer.cpp
+    src/semantic_encoder.cpp
+    src/rate_controller.cpp
+    src/jpeg_encoder.cpp
+    src/opencv_bridge.cpp
+    src/video_source.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
