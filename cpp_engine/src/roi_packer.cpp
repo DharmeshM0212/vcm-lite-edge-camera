@@ -23,17 +23,19 @@ Frame make_context_frame(const Frame& frame, int target_width) {
 }
 
 PackedRoiTile pack_roi_tile(const Frame& frame, const RoiResult& roi_result, int cell_width, int cell_height, int max_rois) {
-    int roi_count = std::min(static_cast<int>(roi_result.boxes.size()), max_rois);
+    int safe_cell_width = std::max(32, cell_width);
+    int safe_cell_height = std::max(32, cell_height);
+    int roi_count = std::min(static_cast<int>(roi_result.boxes.size()), std::max(0, max_rois));
 
     if (roi_count <= 0) {
-        cv::Mat empty_tile(cell_height, cell_width, CV_8UC3, cv::Scalar(0, 0, 0));
+        cv::Mat empty_tile(safe_cell_height, safe_cell_width, CV_8UC3, cv::Scalar(0, 0, 0));
 
         PackedRoiTile packed;
         packed.tile = mat_to_frame(empty_tile, frame.id);
         packed.tile_cols = 1;
         packed.tile_rows = 1;
-        packed.cell_width = cell_width;
-        packed.cell_height = cell_height;
+        packed.cell_width = safe_cell_width;
+        packed.cell_height = safe_cell_height;
         return packed;
     }
 
@@ -41,7 +43,7 @@ PackedRoiTile pack_roi_tile(const Frame& frame, const RoiResult& roi_result, int
     int tile_rows = static_cast<int>(std::ceil(static_cast<double>(roi_count) / static_cast<double>(tile_cols)));
 
     cv::Mat input = frame_to_mat(frame);
-    cv::Mat tile(tile_rows * cell_height, tile_cols * cell_width, input.type(), cv::Scalar(0, 0, 0));
+    cv::Mat tile(tile_rows * safe_cell_height, tile_cols * safe_cell_width, input.type(), cv::Scalar(0, 0, 0));
 
     for (int i = 0; i < roi_count; i++) {
         const RoiBox& box = roi_result.boxes[static_cast<std::size_t>(i)];
@@ -55,11 +57,11 @@ PackedRoiTile pack_roi_tile(const Frame& frame, const RoiResult& roi_result, int
         cv::Mat crop = input(src_rect);
 
         cv::Mat resized;
-        cv::resize(crop, resized, cv::Size(cell_width, cell_height), 0.0, 0.0, cv::INTER_LINEAR);
+        cv::resize(crop, resized, cv::Size(safe_cell_width, safe_cell_height), 0.0, 0.0, cv::INTER_LINEAR);
 
         int row = i / tile_cols;
         int col = i % tile_cols;
-        cv::Rect dst_rect(col * cell_width, row * cell_height, cell_width, cell_height);
+        cv::Rect dst_rect(col * safe_cell_width, row * safe_cell_height, safe_cell_width, safe_cell_height);
 
         resized.copyTo(tile(dst_rect));
     }
@@ -68,7 +70,7 @@ PackedRoiTile pack_roi_tile(const Frame& frame, const RoiResult& roi_result, int
     packed.tile = mat_to_frame(tile, frame.id);
     packed.tile_cols = tile_cols;
     packed.tile_rows = tile_rows;
-    packed.cell_width = cell_width;
-    packed.cell_height = cell_height;
+    packed.cell_width = safe_cell_width;
+    packed.cell_height = safe_cell_height;
     return packed;
 }

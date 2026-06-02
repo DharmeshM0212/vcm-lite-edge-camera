@@ -29,6 +29,14 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"isp_profile\":\"" << metrics.isp_profile << "\",";
     ss << "\"roi_count\":" << metrics.roi_count << ",";
     ss << "\"roi_area_ratio\":" << metrics.roi_area_ratio << ",";
+    ss << "\"detected_object_count\":" << metrics.detected_object_count << ",";
+    ss << "\"detector_ran\":" << (metrics.detector_ran ? "true" : "false") << ",";
+    ss << "\"detector_used_dnn\":" << (metrics.detector_used_dnn ? "true" : "false") << ",";
+    ss << "\"raw_detector_candidates\":" << metrics.raw_detector_candidates << ",";
+    ss << "\"max_detector_confidence\":" << metrics.max_detector_confidence << ",";
+    ss << "\"reference_ai_confidence\":" << metrics.reference_ai_confidence << ",";
+    ss << "\"compressed_ai_confidence\":" << metrics.compressed_ai_confidence << ",";
+    ss << "\"detector_confidence_loss\":" << metrics.detector_confidence_loss << ",";
     ss << "\"roi_quality\":" << metrics.roi_quality << ",";
     ss << "\"context_quality\":" << metrics.context_quality << ",";
     ss << "\"context_width\":" << metrics.context_width << ",";
@@ -40,6 +48,11 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"total_encoded_bytes\":" << metrics.total_encoded_bytes << ",";
     ss << "\"detector_interval\":" << metrics.detector_interval << ",";
     ss << "\"reencode_allowed\":" << (metrics.reencode_allowed ? "true" : "false") << ",";
+    ss << "\"reencoded\":" << (metrics.reencoded ? "true" : "false") << ",";
+    ss << "\"reencode_attempts\":" << metrics.reencode_attempts << ",";
+    ss << "\"initial_roi_quality\":" << metrics.initial_roi_quality << ",";
+    ss << "\"final_roi_quality\":" << metrics.final_roi_quality << ",";
+    ss << "\"initial_ai_stability_loss\":" << metrics.initial_ai_stability_loss << ",";
     ss << "\"controller_state\":\"" << metrics.controller_state << "\",";
     ss << "\"ai_stability_loss\":" << metrics.ai_stability_loss << ",";
     ss << "\"cpu_percent\":" << metrics.cpu_percent << ",";

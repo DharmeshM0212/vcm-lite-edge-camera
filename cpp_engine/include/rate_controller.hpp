@@ -19,6 +19,9 @@ struct RateControllerOutput {
     int roi_quality;
     int context_quality;
     int detector_interval;
+    int context_width;
+    int roi_cell_size;
+    int max_rois;
     bool reencode_allowed;
     std::string controller_state;
 };
@@ -34,4 +37,13 @@ private:
     int roi_quality_;
     int context_quality_;
     int detector_interval_;
+    int context_width_;
+    int roi_cell_size_;
+    int max_rois_;
+    std::uint32_t previous_dropped_frames_;
+
+    double bitrate_error_ratio(double bitrate_kbps) const;
+    bool is_overloaded(const RateControllerInput& input) const;
+    bool is_ai_unstable(const RateControllerInput& input) const;
+    bool is_rate_limited(const RateControllerInput& input) const;
 };

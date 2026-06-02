@@ -9,6 +9,7 @@ find_package(OpenCV REQUIRED)
 
 add_executable(vcm_lite_engine
     src/main.cpp
+    src/ai_detector.cpp
     src/metrics.cpp
     src/config.cpp
     src/frame.cpp
@@ -19,9 +20,12 @@ add_executable(vcm_lite_engine
     src/motion_roi.cpp
     src/roi_packer.cpp
     src/semantic_encoder.cpp
+    src/semantic_reconstruct.cpp
     src/rate_controller.cpp
     src/jpeg_encoder.cpp
     src/stability.cpp
+    src/metadata.cpp
+    src/log_writer.cpp
     src/opencv_bridge.cpp
     src/video_source.cpp
 )

@@ -1,0 +1,95 @@
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+from dashboard import render_dashboard, render_empty_dashboard
+from log_reader import read_last_json_line, read_recent_json_lines, summarize_metrics
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_METRICS_LOG = ROOT_DIR / "logs" / "metrics.jsonl"
+DEFAULT_METADATA_LOG = ROOT_DIR / "logs" / "metadata.jsonl"
+
+app = FastAPI(title="VCM-Lite Edge Camera Control Plane")
+
+
+class LogConfig(BaseModel):
+    metrics_log_path: str = str(DEFAULT_METRICS_LOG)
+    metadata_log_path: str = str(DEFAULT_METADATA_LOG)
+
+
+state: dict[str, Any] = {
+    "metrics_log_path": str(DEFAULT_METRICS_LOG),
+    "metadata_log_path": str(DEFAULT_METADATA_LOG),
+    "service": "vcm-lite-control-plane"
+}
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    metrics_path = Path(state["metrics_log_path"])
+    metadata_path = Path(state["metadata_log_path"])
+
+    return {
+        "status": "ok",
+        "service": state["service"],
+        "metrics_log_exists": metrics_path.exists(),
+        "metadata_log_exists": metadata_path.exists(),
+        "metrics_log_path": str(metrics_path),
+        "metadata_log_path": str(metadata_path)
+    }
+
+
+@app.post("/config/logs")
+def set_log_paths(config: LogConfig) -> dict[str, Any]:
+    state["metrics_log_path"] = config.metrics_log_path
+    state["metadata_log_path"] = config.metadata_log_path
+    return {
+        "metrics_log_path": state["metrics_log_path"],
+        "metadata_log_path": state["metadata_log_path"]
+    }
+
+
+@app.get("/metrics/latest")
+def latest_metrics() -> dict[str, Any]:
+    return read_last_json_line(state["metrics_log_path"])
+
+
+@app.get("/metadata/latest")
+def latest_metadata() -> dict[str, Any]:
+    return read_last_json_line(state["metadata_log_path"])
+
+
+@app.get("/metrics/recent")
+def recent_metrics(limit: int = 50) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 500))
+    return read_recent_json_lines(state["metrics_log_path"], safe_limit)
+
+
+@app.get("/metadata/recent")
+def recent_metadata(limit: int = 50) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 500))
+    return read_recent_json_lines(state["metadata_log_path"], safe_limit)
+
+
+@app.get("/summary")
+def summary(limit: int = 200) -> dict[str, Any]:
+    safe_limit = max(1, min(limit, 1000))
+    records = read_recent_json_lines(state["metrics_log_path"], safe_limit)
+    return summarize_metrics(records)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    metrics = read_last_json_line(state["metrics_log_path"])
+    metadata = read_last_json_line(state["metadata_log_path"])
+    records = read_recent_json_lines(state["metrics_log_path"], 200)
+    summary_data = summarize_metrics(records)
+
+    if not metrics:
+        return HTMLResponse(render_empty_dashboard())
+
+    return HTMLResponse(render_dashboard(metrics, metadata, summary_data))

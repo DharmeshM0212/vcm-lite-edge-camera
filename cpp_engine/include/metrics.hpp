@@ -26,6 +26,14 @@ struct EngineMetrics {
     std::string isp_profile;
     std::uint32_t roi_count;
     double roi_area_ratio;
+    std::uint32_t detected_object_count;
+    bool detector_ran;
+    bool detector_used_dnn;
+    std::uint32_t raw_detector_candidates;
+    double max_detector_confidence;
+    double reference_ai_confidence;
+    double compressed_ai_confidence;
+    double detector_confidence_loss;
     std::uint32_t roi_quality;
     std::uint32_t context_quality;
     std::uint32_t context_width;
@@ -37,6 +45,11 @@ struct EngineMetrics {
     std::uint32_t total_encoded_bytes;
     std::uint32_t detector_interval;
     bool reencode_allowed;
+    bool reencoded;
+    std::uint32_t reencode_attempts;
+    std::uint32_t initial_roi_quality;
+    std::uint32_t final_roi_quality;
+    double initial_ai_stability_loss;
     std::string controller_state;
     double ai_stability_loss;
     double cpu_percent;
