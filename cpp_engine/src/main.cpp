@@ -10,6 +10,7 @@
 #include "roi.hpp"
 #include "roi_packer.hpp"
 #include "semantic_encoder.hpp"
+#include "stability.hpp"
 #include "video_source.hpp"
 
 #include <atomic>
@@ -67,6 +68,8 @@ int main(int argc, char** argv) {
         std::uint64_t fps_window_count = 0;
         double measured_fps = 0.0;
         double previous_bitrate_kbps = 0.0;
+        double previous_ai_stability_loss = 0.0;
+
         RateControllerOutput controller_output;
         controller_output.roi_quality = 85;
         controller_output.context_quality = 35;
@@ -92,32 +95,20 @@ int main(int argc, char** argv) {
                 double latency_ms = std::chrono::duration<double, std::milli>(now - maybe_frame->created_at).count();
 
                 ImageStats input_stats = compute_image_stats(*maybe_frame);
-                double brightness_gain = choose_brightness_gain(input_stats.mean_brightness);
-                double gamma = choose_gamma(input_stats.mean_brightness);
-                Frame gain_frame = apply_brightness_gain(*maybe_frame, brightness_gain);
-                Frame tuned_frame = apply_gamma_correction(gain_frame, gamma);
-                ImageStats stats = compute_image_stats(tuned_frame);
+                IspSettings isp_settings = choose_isp_settings(input_stats);
+                Frame tuned_frame = apply_isp_tuning(*maybe_frame, isp_settings);
+                ImageStats output_stats = compute_image_stats(tuned_frame);
 
                 RoiResult roi_result = motion_detector.detect(tuned_frame);
 
-                if (roi_result.boxes.empty()) {
-                    roi_result = detect_synthetic_roi(tuned_frame);
-                }
-
-                double roi_area = 0.0;
-
-                for (const auto& box : roi_result.boxes) {
-                    roi_area += static_cast<double>(box.width * box.height);
-                }
-
-                double frame_area = static_cast<double>(tuned_frame.width * tuned_frame.height);
-                double roi_area_ratio = frame_area > 0.0 ? roi_area / frame_area : 0.0;
+                double current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
 
                 RateControllerInput controller_input;
                 controller_input.latency_ms = latency_ms;
-                controller_input.roi_area_ratio = roi_area_ratio;
+                controller_input.roi_area_ratio = current_roi_area_ratio;
                 controller_input.estimated_fps = measured_fps > 0.0 ? measured_fps : source_fps;
                 controller_input.previous_bitrate_kbps = previous_bitrate_kbps;
+                controller_input.previous_ai_stability_loss = previous_ai_stability_loss;
                 controller_input.queue_depth = static_cast<std::uint32_t>(queue.size());
                 controller_input.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());
 
@@ -135,6 +126,9 @@ int main(int argc, char** argv) {
                 EncodedImage context_jpeg = encode_jpeg(context_frame, encode_result.context_quality);
                 EncodedImage roi_tile_jpeg = encode_jpeg(roi_tile.tile, encode_result.roi_quality);
 
+                StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
+                previous_ai_stability_loss = stability.total_loss;
+
                 std::size_t total_encoded_bytes = context_jpeg.bytes.size() + roi_tile_jpeg.bytes.size();
                 double actual_bitrate_kbps = estimate_frame_bitrate_kbps(
                     total_encoded_bytes,
@@ -148,11 +142,24 @@ int main(int argc, char** argv) {
                 metrics.fps = measured_fps;
                 metrics.latency_ms = latency_ms;
                 metrics.bitrate_kbps = actual_bitrate_kbps;
-                metrics.mean_brightness = stats.mean_brightness;
-                metrics.brightness_gain = brightness_gain;
-                metrics.gamma = gamma;
+                metrics.input_brightness = input_stats.mean_brightness;
+                metrics.input_contrast = input_stats.contrast;
+                metrics.input_sharpness = input_stats.sharpness;
+                metrics.input_noise = input_stats.noise;
+                metrics.mean_brightness = output_stats.mean_brightness;
+                metrics.output_contrast = output_stats.contrast;
+                metrics.output_sharpness = output_stats.sharpness;
+                metrics.output_noise = output_stats.noise;
+                metrics.brightness_gain = isp_settings.brightness_gain;
+                metrics.gamma = isp_settings.gamma;
+                metrics.contrast_alpha = isp_settings.contrast_alpha;
+                metrics.contrast_beta = isp_settings.contrast_beta;
+                metrics.denoise_strength = isp_settings.denoise_strength;
+                metrics.sharpen_amount = isp_settings.sharpen_amount;
+                metrics.clahe_enabled = isp_settings.clahe_enabled;
+                metrics.isp_profile = isp_settings.profile;
                 metrics.roi_count = static_cast<std::uint32_t>(roi_result.boxes.size());
-                metrics.roi_area_ratio = roi_area_ratio;
+                metrics.roi_area_ratio = current_roi_area_ratio;
                 metrics.roi_quality = static_cast<std::uint32_t>(encode_result.roi_quality);
                 metrics.context_quality = static_cast<std::uint32_t>(encode_result.context_quality);
                 metrics.context_width = static_cast<std::uint32_t>(context_frame.width);
@@ -165,7 +172,7 @@ int main(int argc, char** argv) {
                 metrics.detector_interval = static_cast<std::uint32_t>(controller_output.detector_interval);
                 metrics.reencode_allowed = controller_output.reencode_allowed;
                 metrics.controller_state = controller_output.controller_state;
-                metrics.ai_stability_loss = 0.0;
+                metrics.ai_stability_loss = stability.total_loss;
                 metrics.cpu_percent = 0.0;
                 metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);
                 metrics.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());

@@ -21,6 +21,7 @@ add_executable(vcm_lite_engine
     src/semantic_encoder.cpp
     src/rate_controller.cpp
     src/jpeg_encoder.cpp
+    src/stability.cpp
     src/opencv_bridge.cpp
     src/video_source.cpp
 )

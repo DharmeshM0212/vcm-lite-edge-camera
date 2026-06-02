@@ -11,35 +11,43 @@ RateController::RateController(const EngineConfig& config)
 
 RateControllerOutput RateController::update(const RateControllerInput& input) {
     std::string state = "normal";
-    bool overloaded = false;
+
+    bool ai_unstable = input.previous_ai_stability_loss > config_.confidence_loss_threshold;
     bool bitrate_high = input.previous_bitrate_kbps > static_cast<double>(config_.target_bitrate_kbps);
     bool latency_high = input.latency_ms > config_.latency_budget_ms;
     bool queue_high = input.queue_depth >= 2;
     bool drops_high = input.dropped_frames > 0;
-
-    if (latency_high || queue_high || drops_high) {
-        overloaded = true;
-        state = "overload";
-    } else if (bitrate_high) {
-        state = "rate_limited";
-    }
+    bool overloaded = latency_high || queue_high || drops_high;
 
     if (overloaded) {
-        context_quality_ -= 5;
-        roi_quality_ -= 2;
-        detector_interval_ += 1;
+        state = "overload";
+        context_quality_ -= 6;
+        roi_quality_ -= ai_unstable ? 0 : 2;
+        detector_interval_ += 2;
+    } else if (ai_unstable) {
+        state = "ai_protect";
+        roi_quality_ += 5;
+        context_quality_ -= 3;
+
+        if (detector_interval_ > 1) {
+            detector_interval_ -= 1;
+        }
     } else if (bitrate_high) {
-        context_quality_ -= 4;
+        state = "rate_limited";
+        context_quality_ -= 5;
 
         if (input.roi_area_ratio < 0.08) {
             roi_quality_ -= 1;
         }
-    } else {
-        if (input.roi_area_ratio > 0.12) {
-            roi_quality_ += 2;
-        }
 
+        detector_interval_ += 1;
+    } else {
+        state = "normal";
         context_quality_ += 1;
+
+        if (input.roi_area_ratio > 0.12) {
+            roi_quality_ += 1;
+        }
 
         if (detector_interval_ > config_.detector_interval) {
             detector_interval_ -= 1;

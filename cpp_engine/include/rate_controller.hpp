@@ -10,6 +10,7 @@ struct RateControllerInput {
     double roi_area_ratio;
     double estimated_fps;
     double previous_bitrate_kbps;
+    double previous_ai_stability_loss;
     std::uint32_t queue_depth;
     std::uint32_t dropped_frames;
 };

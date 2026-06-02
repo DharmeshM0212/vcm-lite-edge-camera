@@ -1,23 +1,42 @@
 #include "image_statistics.hpp"
 
+#include "opencv_bridge.hpp"
+
+#include <opencv2/opencv.hpp>
+
 ImageStats compute_image_stats(const Frame& frame) {
-    double sum = 0.0;
-    std::size_t pixel_count = static_cast<std::size_t>(frame.width * frame.height);
+    cv::Mat input = frame_to_mat(frame);
+    cv::Mat gray;
 
-    for (std::size_t i = 0; i < pixel_count; i++) {
-        std::size_t base = i * static_cast<std::size_t>(frame.channels);
-        double r = frame.data[base];
-
-        if (frame.channels == 1) {
-            sum += r;
-        } else {
-            double g = frame.data[base + 1];
-            double b = frame.data[base + 2];
-            sum += 0.299 * r + 0.587 * g + 0.114 * b;
-        }
+    if (input.channels() == 1) {
+        gray = input;
+    } else {
+        cv::cvtColor(input, gray, cv::COLOR_BGR2GRAY);
     }
 
+    cv::Scalar mean_value;
+    cv::Scalar stddev_value;
+    cv::meanStdDev(gray, mean_value, stddev_value);
+
+    cv::Mat laplacian;
+    cv::Laplacian(gray, laplacian, CV_64F);
+
+    cv::Scalar lap_mean;
+    cv::Scalar lap_stddev;
+    cv::meanStdDev(laplacian, lap_mean, lap_stddev);
+
+    cv::Mat blurred;
+    cv::GaussianBlur(gray, blurred, cv::Size(3, 3), 0.0);
+
+    cv::Mat residual;
+    cv::absdiff(gray, blurred, residual);
+
+    cv::Scalar noise_mean = cv::mean(residual);
+
     ImageStats stats;
-    stats.mean_brightness = sum / static_cast<double>(pixel_count);
+    stats.mean_brightness = mean_value[0];
+    stats.contrast = stddev_value[0];
+    stats.sharpness = lap_stddev[0] * lap_stddev[0];
+    stats.noise = noise_mean[0];
     return stats;
 }
