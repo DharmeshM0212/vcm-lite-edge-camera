@@ -3,6 +3,7 @@
 #include "frame_queue.hpp"
 #include "metrics.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -11,36 +12,53 @@
 int main() {
     EngineConfig config = default_config();
     FrameQueue queue(3);
-    std::uint64_t frame_id = 0;
+    std::atomic<bool> running(true);
+    std::atomic<std::uint64_t> produced_frames(0);
+    std::atomic<std::uint64_t> consumed_frames(0);
 
-    while (true) {
-        Frame frame = make_empty_frame(frame_id, 640, 360, 3);
-        queue.push(std::move(frame));
+    std::thread producer([&]() {
+        std::uint64_t frame_id = 0;
 
-        auto maybe_frame = queue.pop();
-
-        EngineMetrics metrics;
-        metrics.frame_id = frame_id;
-        metrics.fps = 30.0;
-        metrics.latency_ms = 12.0;
-        metrics.bitrate_kbps = 0.0;
-        metrics.ai_stability_loss = 0.0;
-        metrics.cpu_percent = 0.0;
-        metrics.ram_mb = 0.0;
-        metrics.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());
-        metrics.queue_depth = static_cast<std::uint32_t>(queue.size());
-        metrics.mode = config.mode;
-
-        if (maybe_frame.has_value()) {
-            metrics.frame_id = maybe_frame->id;
-            metrics.ram_mb = static_cast<double>(maybe_frame->data.size()) / (1024.0 * 1024.0);
+        while (running.load()) {
+            Frame frame = make_empty_frame(frame_id, 640, 360, 3);
+            queue.push(std::move(frame));
+            produced_frames.store(frame_id + 1);
+            frame_id++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(33));
         }
+    });
 
-        std::cout << metrics_to_json(metrics) << std::endl;
+    std::thread consumer([&]() {
+        while (running.load()) {
+            auto maybe_frame = queue.pop();
 
-        frame_id++;
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+            if (maybe_frame.has_value()) {
+                consumed_frames.store(maybe_frame->id + 1);
+
+                EngineMetrics metrics;
+                metrics.frame_id = maybe_frame->id;
+                metrics.fps = 10.0;
+                metrics.latency_ms = 100.0;
+                metrics.bitrate_kbps = 0.0;
+                metrics.ai_stability_loss = 0.0;
+                metrics.cpu_percent = 0.0;
+                metrics.ram_mb = static_cast<double>(maybe_frame->data.size()) / (1024.0 * 1024.0);
+                metrics.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());
+                metrics.queue_depth = static_cast<std::uint32_t>(queue.size());
+                metrics.mode = config.mode;
+
+                std::cout << metrics_to_json(metrics) << std::endl;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+    running.store(false);
+
+    producer.join();
+    consumer.join();
 
     return 0;
 }
