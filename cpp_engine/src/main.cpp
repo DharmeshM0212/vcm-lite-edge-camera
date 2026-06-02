@@ -56,6 +56,14 @@ int main() {
                 Frame tuned_frame = apply_gamma_correction(gain_frame, gamma);
                 ImageStats stats = compute_image_stats(tuned_frame);
                 RoiResult roi_result = detect_synthetic_roi(tuned_frame);
+                double roi_area = 0.0;
+
+                for (const auto& box : roi_result.boxes) {
+                    roi_area += static_cast<double>(box.width * box.height);
+                }
+
+                double frame_area = static_cast<double>(tuned_frame.width * tuned_frame.height);
+                double roi_area_ratio = frame_area > 0.0 ? roi_area / frame_area : 0.0;
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
                 metrics.fps = measured_fps;
@@ -66,6 +74,7 @@ int main() {
                 metrics.brightness_gain = brightness_gain;
                 metrics.gamma = gamma;
                 metrics.roi_count = static_cast<std::uint32_t>(roi_result.boxes.size());
+                metrics.roi_area_ratio = roi_area_ratio;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
                 metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);

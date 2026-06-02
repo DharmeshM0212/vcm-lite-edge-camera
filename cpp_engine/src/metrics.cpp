@@ -15,6 +15,7 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"brightness_gain\":" << metrics.brightness_gain << ",";
     ss << "\"gamma\":" << metrics.gamma << ",";
     ss << "\"roi_count\":" << metrics.roi_count << ",";
+    ss << "\"roi_area_ratio\":" << metrics.roi_area_ratio << ",";
     ss << "\"ai_stability_loss\":" << metrics.ai_stability_loss << ",";
     ss << "\"cpu_percent\":" << metrics.cpu_percent << ",";
     ss << "\"ram_mb\":" << metrics.ram_mb << ",";
