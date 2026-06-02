@@ -28,16 +28,28 @@ int main() {
         }
     });
 
-    std::thread consumer([&]() {
+        std::thread consumer([&]() {
+        auto fps_window_start = std::chrono::steady_clock::now();
+        std::uint64_t fps_window_count = 0;
+        double measured_fps = 0.0;
+
         while (running.load()) {
             auto maybe_frame = queue.pop();
 
             if (maybe_frame.has_value()) {
                 consumed_frames.store(maybe_frame->id + 1);
+                fps_window_count++;
+                auto fps_now = std::chrono::steady_clock::now();
+                auto fps_elapsed = std::chrono::duration<double>(fps_now - fps_window_start).count();
 
+                if (fps_elapsed >= 1.0) {
+                    measured_fps = static_cast<double>(fps_window_count) / fps_elapsed;
+                    fps_window_count = 0;
+                    fps_window_start = fps_now;
+                }
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
-                metrics.fps = 10.0;
+                metrics.fps = measured_fps;
                 auto now = std::chrono::steady_clock::now();
                 metrics.latency_ms = std::chrono::duration<double, std::milli>(now - maybe_frame->created_at).count();
                 metrics.bitrate_kbps = 0.0;
