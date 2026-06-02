@@ -18,6 +18,7 @@ add_executable(vcm_lite_engine
     src/roi.cpp
     src/semantic_encoder.cpp
     src/opencv_bridge.cpp
+    src/roi_packer.cpp
     src/video_source.cpp
     src/motion_roi.cpp
 )
