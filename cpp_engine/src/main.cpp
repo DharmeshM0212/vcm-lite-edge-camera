@@ -4,7 +4,7 @@
 #include "image_statistics.hpp"
 #include "isp_tuning.hpp"
 #include "metrics.hpp"
-#include "roi.hpp"
+#include "motion_roi.hpp"
 #include "semantic_encoder.hpp"
 #include "video_source.hpp"
 
@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
 
     EngineConfig config = default_config();
     FrameQueue queue(3);
+    MotionRoiDetector motion_detector;
     std::atomic<bool> running(true);
 
     double source_fps = source.fps();
@@ -82,7 +83,11 @@ int main(int argc, char** argv) {
                 Frame gain_frame = apply_brightness_gain(*maybe_frame, brightness_gain);
                 Frame tuned_frame = apply_gamma_correction(gain_frame, gamma);
                 ImageStats stats = compute_image_stats(tuned_frame);
-                RoiResult roi_result = detect_synthetic_roi(tuned_frame);
+                RoiResult roi_result = motion_detector.detect(tuned_frame);
+
+                if (roi_result.boxes.empty()) {
+                    roi_result = detect_synthetic_roi(tuned_frame);
+                }
 
                 double roi_area = 0.0;
 

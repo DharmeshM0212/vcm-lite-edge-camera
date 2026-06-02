@@ -19,6 +19,7 @@ add_executable(vcm_lite_engine
     src/semantic_encoder.cpp
     src/opencv_bridge.cpp
     src/video_source.cpp
+    src/motion_roi.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
