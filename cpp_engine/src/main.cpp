@@ -48,7 +48,9 @@ int main() {
                     fps_window_count = 0;
                     fps_window_start = fps_now;
                 }
-                Frame tuned_frame = apply_brightness_gain(*maybe_frame, 1.25);
+                ImageStats input_stats = compute_image_stats(*maybe_frame);
+                double brightness_gain = choose_brightness_gain(input_stats.mean_brightness);
+                Frame tuned_frame = apply_brightness_gain(*maybe_frame, brightness_gain);
                 ImageStats stats = compute_image_stats(tuned_frame);
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;

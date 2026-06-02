@@ -3,6 +3,22 @@
 #include <algorithm>
 #include <cmath>
 
+double choose_brightness_gain(double mean_brightness) {
+    if (mean_brightness < 70.0) {
+        return 1.6;
+    }
+
+    if (mean_brightness < 110.0) {
+        return 1.25;
+    }
+
+    if (mean_brightness > 190.0) {
+        return 0.85;
+    }
+
+    return 1.0;
+}
+
 Frame apply_brightness_gain(const Frame& input, double gain) {
     Frame output = input;
 
