@@ -2,7 +2,7 @@
 #include "frame.hpp"
 #include "frame_queue.hpp"
 #include "metrics.hpp"
-
+#include "image_statistics.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -47,12 +47,13 @@ int main() {
                     fps_window_count = 0;
                     fps_window_start = fps_now;
                 }
+                ImageStats stats = compute_image_stats(*maybe_frame);
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
                 metrics.fps = measured_fps;
                 auto now = std::chrono::steady_clock::now();
                 metrics.latency_ms = std::chrono::duration<double, std::milli>(now - maybe_frame->created_at).count();
-                metrics.bitrate_kbps = 0.0;
+                metrics.bitrate_kbps = stats.mean_brightness;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
                 metrics.ram_mb = static_cast<double>(maybe_frame->data.size()) / (1024.0 * 1024.0);

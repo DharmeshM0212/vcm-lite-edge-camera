@@ -11,6 +11,7 @@ add_executable(vcm_lite_engine
     src/config.cpp
     src/frame.cpp
     src/frame_queue.cpp
+    src/image_statistics.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include)
