@@ -5,6 +5,8 @@ project(vcm_lite_engine LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(OpenCV REQUIRED)
+
 add_executable(vcm_lite_engine
     src/main.cpp
     src/metrics.cpp
@@ -14,6 +16,9 @@ add_executable(vcm_lite_engine
     src/image_statistics.cpp
     src/isp_tuning.cpp
     src/roi.cpp
+    src/semantic_encoder.cpp
+    src/opencv_bridge.cpp
 )
 
-target_include_directories(vcm_lite_engine PRIVATE include)
+target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(vcm_lite_engine PRIVATE ${OpenCV_LIBS})

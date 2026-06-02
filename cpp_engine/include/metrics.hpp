@@ -13,6 +13,8 @@ struct EngineMetrics {
     double gamma;
     std::uint32_t roi_count;
     double roi_area_ratio;
+    std::uint32_t roi_quality;
+    std::uint32_t context_quality;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;
