@@ -38,7 +38,8 @@ int main() {
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
                 metrics.fps = 10.0;
-                metrics.latency_ms = 100.0;
+                auto now = std::chrono::steady_clock::now();
+                metrics.latency_ms = std::chrono::duration<double, std::milli>(now - maybe_frame->created_at).count();
                 metrics.bitrate_kbps = 0.0;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
