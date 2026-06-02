@@ -11,6 +11,7 @@ struct EngineMetrics {
     double mean_brightness;
     double brightness_gain;
     double gamma;
+    std::uint32_t roi_count;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;

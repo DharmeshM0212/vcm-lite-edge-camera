@@ -13,6 +13,7 @@ add_executable(vcm_lite_engine
     src/frame_queue.cpp
     src/image_statistics.cpp
     src/isp_tuning.cpp
+    src/roi.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include)
