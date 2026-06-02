@@ -10,6 +10,7 @@ struct EngineMetrics {
     double bitrate_kbps;
     double mean_brightness;
     double brightness_gain;
+    double gamma;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;

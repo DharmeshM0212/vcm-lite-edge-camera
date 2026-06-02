@@ -50,7 +50,9 @@ int main() {
                 }
                 ImageStats input_stats = compute_image_stats(*maybe_frame);
                 double brightness_gain = choose_brightness_gain(input_stats.mean_brightness);
-                Frame tuned_frame = apply_brightness_gain(*maybe_frame, brightness_gain);
+                double gamma = choose_gamma(input_stats.mean_brightness);
+                Frame gain_frame = apply_brightness_gain(*maybe_frame, brightness_gain);
+                Frame tuned_frame = apply_gamma_correction(gain_frame, gamma);
                 ImageStats stats = compute_image_stats(tuned_frame);
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
@@ -60,6 +62,7 @@ int main() {
                 metrics.bitrate_kbps = 0.0;
                 metrics.mean_brightness = stats.mean_brightness;
                 metrics.brightness_gain = brightness_gain;
+                metrics.gamma = gamma;
                 metrics.ai_stability_loss = 0.0;
                 metrics.cpu_percent = 0.0;
                 metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);
