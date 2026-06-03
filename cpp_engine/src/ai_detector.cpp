@@ -317,6 +317,70 @@ DetectorResult OpenCVDnnDetector::detect_with_dnn(const Frame& frame) {
     return result;
 }
 
+RoiResult detector_result_to_roi_result(const Frame& frame, const DetectorResult& detector_result, double min_confidence, int padding_pixels) {
+    RoiResult result;
+
+    for (const auto& object : detector_result.objects) {
+        if (object.confidence < min_confidence) {
+            continue;
+        }
+
+        RoiBox box;
+        box.x = object.x - padding_pixels;
+        box.y = object.y - padding_pixels;
+        box.width = object.width + 2 * padding_pixels;
+        box.height = object.height + 2 * padding_pixels;
+        box.confidence = std::clamp(object.confidence, 0.0, 1.0);
+
+        result.boxes.push_back(clamp_roi_box(box, frame.width, frame.height));
+    }
+
+    return result;
+}
+
+RoiResult fuse_detector_and_motion_rois(const Frame& frame, const DetectorResult& detector_result, const RoiResult& motion_roi_result, int max_rois) {
+    RoiResult fused;
+    RoiResult object_rois = detector_result_to_roi_result(frame, detector_result, 0.15, 12);
+
+    std::sort(object_rois.boxes.begin(), object_rois.boxes.end(), [](const RoiBox& a, const RoiBox& b) {
+        return a.confidence > b.confidence;
+    });
+
+    for (const auto& box : object_rois.boxes) {
+        if (static_cast<int>(fused.boxes.size()) >= max_rois) {
+            break;
+        }
+
+        fused.boxes.push_back(box);
+    }
+
+    for (const auto& motion_box : motion_roi_result.boxes) {
+        if (static_cast<int>(fused.boxes.size()) >= max_rois) {
+            break;
+        }
+
+        bool overlaps_object = false;
+
+        for (const auto& existing : fused.boxes) {
+            if (roi_iou(existing, motion_box) > 0.20) {
+                overlaps_object = true;
+                break;
+            }
+        }
+
+        if (!overlaps_object) {
+            RoiBox box = motion_box;
+            box.confidence = std::min(0.70, box.confidence);
+            fused.boxes.push_back(clamp_roi_box(box, frame.width, frame.height));
+        }
+    }
+
+    fused = merge_overlapping_rois(fused, 0.20, frame.width, frame.height);
+    fused = limit_rois(fused, max_rois);
+
+    return fused;
+}
+
 double detector_confidence_loss(double reference_confidence, double compressed_confidence) {
     return std::clamp(std::abs(reference_confidence - compressed_confidence), 0.0, 1.0);
 }

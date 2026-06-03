@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from dashboard import render_dashboard, render_empty_dashboard
@@ -12,6 +13,7 @@ from log_reader import read_last_json_line, read_recent_json_lines, summarize_me
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_METRICS_LOG = ROOT_DIR / "logs" / "metrics.jsonl"
 DEFAULT_METADATA_LOG = ROOT_DIR / "logs" / "metadata.jsonl"
+DEFAULT_OUTPUT_DIR = ROOT_DIR / "outputs"
 
 app = FastAPI(title="VCM-Lite Edge Camera Control Plane")
 
@@ -24,22 +26,40 @@ class LogConfig(BaseModel):
 state: dict[str, Any] = {
     "metrics_log_path": str(DEFAULT_METRICS_LOG),
     "metadata_log_path": str(DEFAULT_METADATA_LOG),
+    "output_dir": str(DEFAULT_OUTPUT_DIR),
     "service": "vcm-lite-control-plane"
 }
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     metrics_path = Path(state["metrics_log_path"])
     metadata_path = Path(state["metadata_log_path"])
+    output_dir = Path(state["output_dir"])
 
     return {
         "status": "ok",
         "service": state["service"],
         "metrics_log_exists": metrics_path.exists(),
         "metadata_log_exists": metadata_path.exists(),
+        "output_dir_exists": output_dir.exists(),
+        "detection_event_exists": (output_dir / "latest_detection_event.json").exists(),
+        "detection_frame_exists": (output_dir / "latest_detection_frame.jpg").exists(),
+        "detection_crop_exists": (output_dir / "latest_detection_crop.jpg").exists(),
+        "detection_reconstructed_exists": (output_dir / "latest_detection_reconstructed.jpg").exists(),
         "metrics_log_path": str(metrics_path),
-        "metadata_log_path": str(metadata_path)
+        "metadata_log_path": str(metadata_path),
+        "output_dir": str(output_dir)
     }
 
 
@@ -63,6 +83,12 @@ def latest_metadata() -> dict[str, Any]:
     return read_last_json_line(state["metadata_log_path"])
 
 
+@app.get("/event/latest")
+def latest_detection_event() -> dict[str, Any]:
+    output_dir = Path(state["output_dir"])
+    return read_json_file(output_dir / "latest_detection_event.json")
+
+
 @app.get("/metrics/recent")
 def recent_metrics(limit: int = 50) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 500))
@@ -82,6 +108,24 @@ def summary(limit: int = 200) -> dict[str, Any]:
     return summarize_metrics(records)
 
 
+@app.get("/image/detection-frame")
+def detection_frame() -> FileResponse:
+    path = Path(state["output_dir"]) / "latest_detection_frame.jpg"
+    return FileResponse(path)
+
+
+@app.get("/image/detection-crop")
+def detection_crop() -> FileResponse:
+    path = Path(state["output_dir"]) / "latest_detection_crop.jpg"
+    return FileResponse(path)
+
+
+@app.get("/image/detection-reconstructed")
+def detection_reconstructed() -> FileResponse:
+    path = Path(state["output_dir"]) / "latest_detection_reconstructed.jpg"
+    return FileResponse(path)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     metrics = read_last_json_line(state["metrics_log_path"])
@@ -92,4 +136,13 @@ def dashboard() -> HTMLResponse:
     if not metrics:
         return HTMLResponse(render_empty_dashboard())
 
-    return HTMLResponse(render_dashboard(metrics, metadata, summary_data))
+    output_dir = Path(state["output_dir"])
+    event = read_json_file(output_dir / "latest_detection_event.json")
+
+    image_status = {
+        "detection_frame": (output_dir / "latest_detection_frame.jpg").exists(),
+        "detection_crop": (output_dir / "latest_detection_crop.jpg").exists(),
+        "detection_reconstructed": (output_dir / "latest_detection_reconstructed.jpg").exists()
+    }
+
+    return HTMLResponse(render_dashboard(metrics, metadata, summary_data, image_status, event))

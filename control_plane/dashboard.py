@@ -1,4 +1,5 @@
 from html import escape
+from time import time
 from typing import Any
 
 
@@ -19,35 +20,88 @@ def status_class(metrics: dict[str, Any]) -> str:
     return "ok"
 
 
-def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary: dict[str, Any]) -> str:
+def image_card(title: str, endpoint: str, exists: bool) -> str:
+    version = str(int(time()))
+
+    if not exists:
+        return f"""
+        <div class="image-card">
+            <div class="image-title">{escape(title)}</div>
+            <div class="image-placeholder">Image not available</div>
+        </div>
+        """
+
+    return f"""
+    <div class="image-card">
+        <div class="image-title">{escape(title)}</div>
+        <img src="{endpoint}?t={version}" alt="{escape(title)}">
+    </div>
+    """
+
+
+def render_event_panel(event: dict[str, Any]) -> str:
+    if not event:
+        return """
+        <div class="panel">
+            <h2>Last Object Detection Event</h2>
+            <p class="muted">No object detection event has been saved yet.</p>
+        </div>
+        """
+
+    primary = event.get("primary_object", {})
+    label = escape(str(primary.get("label", "-")))
+
+    return f"""
+    <div class="panel">
+        <h2>Last Object Detection Event</h2>
+        <div class="kv">
+            <div class="key">Frame ID</div>
+            <div class="value">{fmt(event.get("frame_id"), 0)}</div>
+
+            <div class="key">Primary object</div>
+            <div class="value">{label}</div>
+
+            <div class="key">Object confidence</div>
+            <div class="value">{fmt(primary.get("confidence"), 3)}</div>
+
+            <div class="key">Bounding box</div>
+            <div class="value">
+                x={fmt(primary.get("x"), 0)},
+                y={fmt(primary.get("y"), 0)},
+                w={fmt(primary.get("width"), 0)},
+                h={fmt(primary.get("height"), 0)}
+            </div>
+
+            <div class="key">Reference confidence</div>
+            <div class="value">{fmt(event.get("reference_ai_confidence"), 3)}</div>
+
+            <div class="key">Compressed confidence</div>
+            <div class="value">{fmt(event.get("compressed_ai_confidence"), 3)}</div>
+
+            <div class="key">Detector confidence loss</div>
+            <div class="value">{fmt(event.get("detector_confidence_loss"), 3)}</div>
+
+            <div class="key">AI stability loss</div>
+            <div class="value">{fmt(event.get("ai_stability_loss"), 3)}</div>
+
+            <div class="key">Objects in frame</div>
+            <div class="value">{fmt(event.get("object_count"), 0)}</div>
+        </div>
+    </div>
+    """
+
+
+def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary: dict[str, Any], image_status: dict[str, bool], event: dict[str, Any]) -> str:
     state_class = status_class(metrics)
     controller_state = escape(str(metrics.get("controller_state", "-")))
     mode = escape(str(metrics.get("mode", "-")))
     isp_profile = escape(str(metrics.get("isp_profile", "-")))
 
-    rois = metadata.get("rois", [])
-    if not isinstance(rois, list):
-        rois = []
+    event_panel = render_event_panel(event)
 
-    roi_rows = ""
-
-    for roi in rois[:8]:
-        roi_rows += f"""
-        <tr>
-            <td>{escape(str(roi.get("id", "-")))}</td>
-            <td>{escape(str(roi.get("x", "-")))}, {escape(str(roi.get("y", "-")))}</td>
-            <td>{escape(str(roi.get("width", "-")))} × {escape(str(roi.get("height", "-")))}</td>
-            <td>{fmt(roi.get("confidence", "-"), 3)}</td>
-            <td>{escape(str(roi.get("tile_x", "-")))}, {escape(str(roi.get("tile_y", "-")))}</td>
-        </tr>
-        """
-
-    if not roi_rows:
-        roi_rows = """
-        <tr>
-            <td colspan="5" class="muted">No active ROI metadata available</td>
-        </tr>
-        """
+    detection_frame_card = image_card("Detection Frame", "/image/detection-frame", image_status.get("detection_frame", False))
+    detection_crop_card = image_card("Detected Object Crop", "/image/detection-crop", image_status.get("detection_crop", False))
+    detection_reconstructed_card = image_card("Semantic Reconstruction", "/image/detection-reconstructed", image_status.get("detection_reconstructed", False))
 
     return f"""
 <!doctype html>
@@ -69,7 +123,6 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             --warn-bg: #fef3c7;
             --bad: #991b1b;
             --bad-bg: #fee2e2;
-            --blue: #1d4ed8;
         }}
 
         body {{
@@ -148,6 +201,7 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             border-radius: 10px;
             padding: 16px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            margin-bottom: 18px;
         }}
 
         .panel h2 {{
@@ -183,28 +237,51 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             margin-bottom: 18px;
         }}
 
-        table {{
-            width: 100%;
-            border-collapse: collapse;
+        .image-grid {{
+            display: grid;
+            grid-template-columns: 1.4fr 0.8fr 1.4fr;
+            gap: 14px;
+            margin-bottom: 18px;
+        }}
+
+        .image-card {{
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }}
+
+        .image-title {{
             font-size: 13px;
-        }}
-
-        th {{
-            text-align: left;
-            color: var(--muted);
             font-weight: 600;
-            border-bottom: 1px solid var(--line);
-            padding: 8px 6px;
+            color: #111827;
+            margin-bottom: 10px;
         }}
 
-        td {{
-            border-bottom: 1px solid var(--line);
-            padding: 8px 6px;
+        .image-card img {{
+            width: 100%;
+            height: 260px;
+            object-fit: contain;
+            background: #0b1220;
+            border-radius: 6px;
+            display: block;
+        }}
+
+        .image-placeholder {{
+            height: 260px;
+            border-radius: 6px;
+            background: #eef2f7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            font-size: 13px;
         }}
 
         .kv {{
             display: grid;
-            grid-template-columns: 180px 1fr;
+            grid-template-columns: 190px 1fr;
             row-gap: 8px;
             column-gap: 12px;
             font-size: 13px;
@@ -236,6 +313,10 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             .section-grid {{
                 grid-template-columns: 1fr;
             }}
+
+            .image-grid {{
+                grid-template-columns: 1fr;
+            }}
         }}
 
         @media (max-width: 640px) {{
@@ -252,7 +333,7 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
 <body>
     <header>
         <h1>VCM-Lite Edge Camera</h1>
-        <p>Real-time semantic video pipeline observability</p>
+        <p>Object-aware semantic video pipeline observability</p>
     </header>
 
     <main>
@@ -284,6 +365,14 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
                 <div class="metric-label">AI Stability Loss</div>
                 <div class="metric-value">{fmt(metrics.get("ai_stability_loss"), 3)}</div>
             </div>
+        </div>
+
+        {event_panel}
+
+        <div class="image-grid">
+            {detection_frame_card}
+            {detection_crop_card}
+            {detection_reconstructed_card}
         </div>
 
         <div class="section-grid">
@@ -373,6 +462,15 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
                     <div class="key">Detected objects</div>
                     <div class="value">{fmt(metrics.get("detected_object_count"), 0)}</div>
 
+                    <div class="key">Detector ran</div>
+                    <div class="value">{escape(str(metrics.get("detector_ran", "-")))}</div>
+
+                    <div class="key">DNN runtime</div>
+                    <div class="value">{escape(str(metrics.get("detector_used_dnn", "-")))}</div>
+
+                    <div class="key">Max confidence</div>
+                    <div class="value">{fmt(metrics.get("max_detector_confidence"), 3)}</div>
+
                     <div class="key">Reference confidence</div>
                     <div class="value">{fmt(metrics.get("reference_ai_confidence"), 3)}</div>
 
@@ -388,26 +486,8 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             </div>
         </div>
 
-        <div class="panel">
-            <h2>ROI Metadata</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Origin</th>
-                        <th>Size</th>
-                        <th>Confidence</th>
-                        <th>Tile Origin</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {roi_rows}
-                </tbody>
-            </table>
-        </div>
-
         <footer>
-            VCM-Lite Edge Camera observability plane. Metrics are read from JSONL logs generated by the C++ engine.
+            VCM-Lite Edge Camera observability plane. Detection event snapshots are generated by the C++ engine.
         </footer>
     </main>
 </body>
@@ -456,7 +536,7 @@ def render_empty_dashboard() -> str:
     <main>
         <div class="panel">
             <h2>No metrics available</h2>
-            <p class="muted">Run the C++ engine first so it writes logs/metrics.jsonl and logs/metadata.jsonl.</p>
+            <p class="muted">Run the C++ engine first so it writes logs/metrics.jsonl and detection event outputs.</p>
         </div>
     </main>
 </body>

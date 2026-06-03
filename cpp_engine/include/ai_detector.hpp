@@ -52,4 +52,6 @@ private:
     std::vector<std::string> load_labels(const std::string& labels_path) const;
 };
 
+RoiResult detector_result_to_roi_result(const Frame& frame, const DetectorResult& detector_result, double min_confidence, int padding_pixels);
+RoiResult fuse_detector_and_motion_rois(const Frame& frame, const DetectorResult& detector_result, const RoiResult& motion_roi_result, int max_rois);
 double detector_confidence_loss(double reference_confidence, double compressed_confidence);

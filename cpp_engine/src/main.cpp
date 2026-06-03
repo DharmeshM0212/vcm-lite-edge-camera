@@ -16,6 +16,8 @@
 #include "semantic_reconstruct.hpp"
 #include "stability.hpp"
 #include "video_source.hpp"
+#include "output_writer.hpp"
+#include "detection_event_writer.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -31,6 +33,7 @@ int main(int argc, char** argv) {
     std::string metadata_log_path = "../../logs/metadata.jsonl";
     std::string model_path = "../../models/object_detector.onnx";
     std::string labels_path = "../../models/labels.txt";
+    std::string output_dir = "../../outputs";
 
     if (argc >= 2) {
         video_path = argv[1];
@@ -50,6 +53,9 @@ int main(int argc, char** argv) {
 
     if (argc >= 6) {
         labels_path = argv[5];
+    }
+    if (argc >= 7) {
+    output_dir = argv[6];
     }
 
     VideoSource source(video_path);
@@ -123,6 +129,8 @@ int main(int argc, char** argv) {
         last_compressed_detector_result.raw_candidate_count = 0;
         last_compressed_detector_result.max_raw_confidence = 0.0;
 
+        std::uint64_t last_detector_frame_id = 0;
+        bool has_detector_frame = false;
         bool detector_ran_this_frame = false;
 
         RateControllerOutput controller_output;
@@ -157,8 +165,7 @@ int main(int argc, char** argv) {
                 Frame tuned_frame = apply_isp_tuning(*maybe_frame, isp_settings);
                 ImageStats output_stats = compute_image_stats(tuned_frame);
 
-                RoiResult roi_result = motion_detector.detect(tuned_frame);
-                double current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
+                RoiResult motion_roi_result = motion_detector.detect(tuned_frame);
 
                 bool warmup_detector = maybe_frame->id < 30;
                 bool scheduled_detector = maybe_frame->id % static_cast<std::uint64_t>(std::max(1, controller_output.detector_interval)) == 0;
@@ -168,9 +175,31 @@ int main(int argc, char** argv) {
                 detector_ran_this_frame = run_detector;
 
                 if (run_detector) {
-                    last_reference_detector_result = ai_detector.detect(tuned_frame, roi_result);
+                    last_reference_detector_result = ai_detector.detect(tuned_frame, motion_roi_result);
+                    last_detector_frame_id = maybe_frame->id;
+                    has_detector_frame = true;
                 }
 
+                std::uint64_t detector_age = has_detector_frame ? maybe_frame->id - last_detector_frame_id : 999999;
+                bool object_roi_fresh = has_detector_frame && detector_age <= 5 && !last_reference_detector_result.objects.empty();
+
+                DetectorResult roi_source_detector_result = last_reference_detector_result;
+
+                if (!object_roi_fresh) {
+                    roi_source_detector_result.objects.clear();
+                    roi_source_detector_result.mean_confidence = 0.0;
+                    roi_source_detector_result.raw_candidate_count = 0;
+                    roi_source_detector_result.max_raw_confidence = 0.0;
+                }
+
+                RoiResult roi_result = fuse_detector_and_motion_rois(
+                    tuned_frame,
+                    roi_source_detector_result,
+                    motion_roi_result,
+                    5
+                );
+
+                double current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
                 RateControllerInput controller_input;
                 controller_input.latency_ms = latency_ms;
                 controller_input.roi_area_ratio = current_roi_area_ratio;
@@ -223,6 +252,8 @@ int main(int argc, char** argv) {
                     tuned_frame.width,
                     tuned_frame.height
                 );
+                Frame final_decoded_roi_tile = decoded_roi_tile;
+                Frame final_reconstructed_frame = reconstructed_frame;
 
                 if (run_detector) {
                     last_compressed_detector_result = ai_detector.detect(reconstructed_frame, roi_result);
@@ -269,6 +300,8 @@ int main(int argc, char** argv) {
                         tuned_frame.width,
                         tuned_frame.height
                     );
+                    final_decoded_roi_tile = repaired_decoded_roi_tile;
+                    final_reconstructed_frame = repaired_reconstructed_frame;
 
                     DetectorResult repaired_compressed_detector_result = last_compressed_detector_result;
 
@@ -391,6 +424,20 @@ int main(int argc, char** argv) {
                     metrics.mode = "dnn_detector";
                 } else {
                     metrics.mode = "motion_detector_fallback";
+                }
+
+                if (detector_ran_this_frame && !last_reference_detector_result.objects.empty()) {
+                    write_detection_event_snapshot(
+                        tuned_frame,
+                        final_reconstructed_frame,
+                        last_reference_detector_result,
+                        maybe_frame->id,
+                        reference_ai_confidence,
+                        compressed_ai_confidence,
+                        current_detector_confidence_loss,
+                        stability.total_loss,
+                        output_dir
+                    );
                 }
 
                 std::string metrics_json = metrics_to_json(metrics);

@@ -28,6 +28,8 @@ add_executable(vcm_lite_engine
     src/log_writer.cpp
     src/opencv_bridge.cpp
     src/video_source.cpp
+    src/output_writer.cpp
+    src/detection_event_writer.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
