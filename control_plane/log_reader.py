@@ -82,3 +82,24 @@ def summarize_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "latest_dropped_frames": latest.get("dropped_frames", 0),
         "latest_queue_depth": latest.get("queue_depth", 0)
     }
+
+
+def summarize_webrtc(records: list[dict[str, Any]]) -> dict[str, Any]:
+    if not records:
+        return {
+            "active": False,
+            "frames": 0
+        }
+
+    latest = records[-1]
+
+    return {
+        "active": True,
+        "frames": len(records),
+        "latest_frame_id": latest.get("frame_id", 0),
+        "fps": latest.get("fps", 0.0),
+        "width": latest.get("width", 0),
+        "height": latest.get("height", 0),
+        "socket_clients": latest.get("socket_clients", 0),
+        "timestamp": latest.get("timestamp", 0.0)
+    }

@@ -7,12 +7,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from dashboard import render_dashboard, render_empty_dashboard
-from log_reader import read_last_json_line, read_recent_json_lines, summarize_metrics
+from log_reader import read_last_json_line, read_recent_json_lines, summarize_metrics, summarize_webrtc
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_METRICS_LOG = ROOT_DIR / "logs" / "metrics.jsonl"
 DEFAULT_METADATA_LOG = ROOT_DIR / "logs" / "metadata.jsonl"
+DEFAULT_WEBRTC_LOG = ROOT_DIR / "logs" / "webrtc_receiver.jsonl"
 DEFAULT_OUTPUT_DIR = ROOT_DIR / "outputs"
 
 app = FastAPI(title="VCM-Lite Edge Camera Control Plane")
@@ -26,6 +27,7 @@ class LogConfig(BaseModel):
 state: dict[str, Any] = {
     "metrics_log_path": str(DEFAULT_METRICS_LOG),
     "metadata_log_path": str(DEFAULT_METADATA_LOG),
+    "webrtc_log_path": str(DEFAULT_WEBRTC_LOG),
     "output_dir": str(DEFAULT_OUTPUT_DIR),
     "service": "vcm-lite-control-plane"
 }
@@ -45,6 +47,7 @@ def read_json_file(path: Path) -> dict[str, Any]:
 def health() -> dict[str, Any]:
     metrics_path = Path(state["metrics_log_path"])
     metadata_path = Path(state["metadata_log_path"])
+    webrtc_path = Path(state["webrtc_log_path"])
     output_dir = Path(state["output_dir"])
 
     return {
@@ -52,6 +55,7 @@ def health() -> dict[str, Any]:
         "service": state["service"],
         "metrics_log_exists": metrics_path.exists(),
         "metadata_log_exists": metadata_path.exists(),
+        "webrtc_log_exists": webrtc_path.exists(),
         "output_dir_exists": output_dir.exists(),
         "detection_event_exists": (output_dir / "latest_detection_event.json").exists(),
         "detection_frame_exists": (output_dir / "latest_detection_frame.jpg").exists(),
@@ -59,6 +63,7 @@ def health() -> dict[str, Any]:
         "detection_reconstructed_exists": (output_dir / "latest_detection_reconstructed.jpg").exists(),
         "metrics_log_path": str(metrics_path),
         "metadata_log_path": str(metadata_path),
+        "webrtc_log_path": str(webrtc_path),
         "output_dir": str(output_dir)
     }
 
@@ -81,6 +86,18 @@ def latest_metrics() -> dict[str, Any]:
 @app.get("/metadata/latest")
 def latest_metadata() -> dict[str, Any]:
     return read_last_json_line(state["metadata_log_path"])
+
+
+@app.get("/webrtc/latest")
+def latest_webrtc() -> dict[str, Any]:
+    return read_last_json_line(state["webrtc_log_path"])
+
+
+@app.get("/webrtc/summary")
+def webrtc_summary(limit: int = 200) -> dict[str, Any]:
+    safe_limit = max(1, min(limit, 1000))
+    records = read_recent_json_lines(state["webrtc_log_path"], safe_limit)
+    return summarize_webrtc(records)
 
 
 @app.get("/event/latest")
@@ -131,7 +148,10 @@ def dashboard() -> HTMLResponse:
     metrics = read_last_json_line(state["metrics_log_path"])
     metadata = read_last_json_line(state["metadata_log_path"])
     records = read_recent_json_lines(state["metrics_log_path"], 200)
+    webrtc_records = read_recent_json_lines(state["webrtc_log_path"], 200)
+
     summary_data = summarize_metrics(records)
+    webrtc_data = summarize_webrtc(webrtc_records)
 
     if not metrics:
         return HTMLResponse(render_empty_dashboard())
@@ -145,4 +165,4 @@ def dashboard() -> HTMLResponse:
         "detection_reconstructed": (output_dir / "latest_detection_reconstructed.jpg").exists()
     }
 
-    return HTMLResponse(render_dashboard(metrics, metadata, summary_data, image_status, event))
+    return HTMLResponse(render_dashboard(metrics, metadata, summary_data, image_status, event, webrtc_data))

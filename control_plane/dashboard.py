@@ -91,7 +91,7 @@ def render_event_panel(event: dict[str, Any]) -> str:
     """
 
 
-def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary: dict[str, Any], image_status: dict[str, bool], event: dict[str, Any]) -> str:
+def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary: dict[str, Any], image_status: dict[str, bool], event: dict[str, Any], webrtc: dict[str, Any]) -> str:
     state_class = status_class(metrics)
     controller_state = escape(str(metrics.get("controller_state", "-")))
     mode = escape(str(metrics.get("mode", "-")))
@@ -351,6 +351,8 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
                 <div class="metric-value">{fmt(metrics.get("fps"), 2)}</div>
             </div>
 
+            
+
             <div class="panel">
                 <div class="metric-label">Latency</div>
                 <div class="metric-value">{fmt(metrics.get("latency_ms"), 1)}<span class="metric-unit">ms</span></div>
@@ -364,6 +366,26 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             <div class="panel">
                 <div class="metric-label">AI Stability Loss</div>
                 <div class="metric-value">{fmt(metrics.get("ai_stability_loss"), 3)}</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>WebRTC Ingest</h2>
+            <div class="kv">
+                <div class="key">Status</div>
+                <div class="value">{"active" if webrtc.get("active", False) else "inactive"}</div>
+
+                <div class="key">Receiver frame ID</div>
+                <div class="value">{fmt(webrtc.get("latest_frame_id"), 0)}</div>
+
+                <div class="key">Receiver FPS</div>
+                <div class="value">{fmt(webrtc.get("fps"), 2)}</div>
+
+                <div class="key">Input frame size</div>
+                <div class="value">{fmt(webrtc.get("width"), 0)} × {fmt(webrtc.get("height"), 0)}</div>
+
+                <div class="key">Socket clients</div>
+                <div class="value">{fmt(webrtc.get("socket_clients"), 0)}</div>
             </div>
         </div>
 

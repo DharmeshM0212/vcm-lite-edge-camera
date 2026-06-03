@@ -34,3 +34,6 @@ add_executable(vcm_lite_engine
 
 target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(vcm_lite_engine PRIVATE ${OpenCV_LIBS})
+if (WIN32)
+    target_link_libraries(vcm_lite_engine PRIVATE ws2_32)
+endif()
