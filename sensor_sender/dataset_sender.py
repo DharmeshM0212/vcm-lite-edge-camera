@@ -1,14 +1,13 @@
 import argparse
 import asyncio
 import fractions
-import time
 from pathlib import Path
 
 import cv2
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from av import VideoFrame
 
-from signaling import FileSignaling
+from http_signaling import HttpSignaling
 
 
 async def wait_for_ice_gathering_complete(pc: RTCPeerConnection) -> None:
@@ -70,23 +69,11 @@ class DatasetVideoTrack(VideoStreamTrack):
         return video_frame
 
 
-async def wait_for_answer(signaling: FileSignaling) -> dict:
-    while True:
-        answer = signaling.read("answer")
-
-        if answer is not None:
-            return answer
-
-        await asyncio.sleep(0.25)
-
-
 async def run(args: argparse.Namespace) -> None:
-    signaling_path = Path(args.signaling_file)
+    signaling = HttpSignaling(args.signaling_url)
 
-    if args.reset and signaling_path.exists():
-        signaling_path.unlink()
-
-    signaling = FileSignaling(args.signaling_file)
+    if args.reset:
+        await signaling.reset()
 
     pc = RTCPeerConnection()
     track = DatasetVideoTrack(args.video, args.loop)
@@ -104,18 +91,17 @@ async def run(args: argparse.Namespace) -> None:
     await pc.setLocalDescription(offer)
     await wait_for_ice_gathering_complete(pc)
 
-    signaling.write(
-        "offer",
+    await signaling.write_offer(
         {
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type,
-        },
+        }
     )
 
-    print("offer_written:", args.signaling_file)
+    print("offer_posted:", args.signaling_url)
     print("waiting_for_answer")
 
-    answer_data = await wait_for_answer(signaling)
+    answer_data = await signaling.wait_for_answer()
     answer = RTCSessionDescription(sdp=answer_data["sdp"], type=answer_data["type"])
     await pc.setRemoteDescription(answer)
 
@@ -133,7 +119,7 @@ async def run(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", required=True)
-    parser.add_argument("--signaling-file", default="../webrtc_signaling/session.json")
+    parser.add_argument("--signaling-url", default="http://127.0.0.1:9000")
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--reset", action="store_true")
     return parser.parse_args()

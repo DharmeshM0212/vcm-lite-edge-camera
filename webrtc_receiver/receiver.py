@@ -10,7 +10,7 @@ import cv2
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from av import VideoFrame
 
-from signaling import FileSignaling
+from http_signaling import HttpSignaling
 
 
 async def wait_for_ice_gathering_complete(pc: RTCPeerConnection) -> None:
@@ -91,16 +91,6 @@ def write_jsonl(path: Path, data: dict[str, Any]) -> None:
         file.write(json.dumps(data) + "\n")
 
 
-async def wait_for_offer(signaling: FileSignaling) -> dict:
-    while True:
-        offer = signaling.read("offer")
-
-        if offer is not None:
-            return offer
-
-        await asyncio.sleep(0.25)
-
-
 async def consume_video(track, output_dir: Path, log_path: Path, frame_server: FrameSocketServer, save_debug_frames: bool) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +136,7 @@ async def consume_video(track, output_dir: Path, log_path: Path, frame_server: F
 
 
 async def run(args: argparse.Namespace) -> None:
-    signaling = FileSignaling(args.signaling_file)
+    signaling = HttpSignaling(args.signaling_url)
     frame_server = FrameSocketServer()
     await frame_server.start(args.frame_host, args.frame_port)
 
@@ -155,6 +145,10 @@ async def run(args: argparse.Namespace) -> None:
     @pc.on("connectionstatechange")
     async def on_connectionstatechange() -> None:
         print("connection_state:", pc.connectionState)
+
+    @pc.on("iceconnectionstatechange")
+    async def on_iceconnectionstatechange() -> None:
+        print("ice_connection_state:", pc.iceConnectionState)
 
     @pc.on("track")
     def on_track(track) -> None:
@@ -171,8 +165,8 @@ async def run(args: argparse.Namespace) -> None:
                 )
             )
 
-    print("waiting_for_offer")
-    offer_data = await wait_for_offer(signaling)
+    print("waiting_for_offer:", args.signaling_url)
+    offer_data = await signaling.wait_for_offer()
     offer = RTCSessionDescription(sdp=offer_data["sdp"], type=offer_data["type"])
 
     await pc.setRemoteDescription(offer)
@@ -181,15 +175,14 @@ async def run(args: argparse.Namespace) -> None:
     await pc.setLocalDescription(answer)
     await wait_for_ice_gathering_complete(pc)
 
-    signaling.write(
-        "answer",
+    await signaling.write_answer(
         {
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type,
-        },
+        }
     )
 
-    print("answer_written:", args.signaling_file)
+    print("answer_posted:", args.signaling_url)
 
     try:
         while True:
@@ -202,7 +195,7 @@ async def run(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--signaling-file", default="../webrtc_signaling/session.json")
+    parser.add_argument("--signaling-url", default="http://127.0.0.1:9000")
     parser.add_argument("--output-dir", default="../outputs")
     parser.add_argument("--log-path", default="../logs/webrtc_receiver.jsonl")
     parser.add_argument("--frame-host", default="127.0.0.1")
