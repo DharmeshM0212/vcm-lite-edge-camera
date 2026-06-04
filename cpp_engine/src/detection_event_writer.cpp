@@ -3,149 +3,214 @@
 #include "opencv_bridge.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <opencv2/opencv.hpp>
 #include <sstream>
+#include <string>
+#include <vector>
 
-static DetectedObject best_object(const DetectorResult& detector_result) {
-    DetectedObject best;
-    best.x = 0;
-    best.y = 0;
-    best.width = 1;
-    best.height = 1;
-    best.confidence = 0.0;
-    best.class_id = -1;
-    best.label = "none";
+namespace fs = std::filesystem;
 
-    for (const auto& object : detector_result.objects) {
-        if (object.confidence > best.confidence) {
-            best = object;
+static std::string json_escape(const std::string& text) {
+    std::ostringstream output;
+
+    for (char c : text) {
+        switch (c) {
+            case '"':
+                output << "\\\"";
+                break;
+            case '\\':
+                output << "\\\\";
+                break;
+            case '\n':
+                output << "\\n";
+                break;
+            case '\r':
+                output << "\\r";
+                break;
+            case '\t':
+                output << "\\t";
+                break;
+            default:
+                output << c;
+                break;
         }
     }
 
-    return best;
+    return output.str();
+}
+
+static cv::Rect clamp_rect(const cv::Rect& rect, int width, int height) {
+    int x = std::max(0, rect.x);
+    int y = std::max(0, rect.y);
+    int right = std::min(width, rect.x + rect.width);
+    int bottom = std::min(height, rect.y + rect.height);
+
+    int w = std::max(0, right - x);
+    int h = std::max(0, bottom - y);
+
+    return cv::Rect(x, y, w, h);
+}
+
+static cv::Rect object_rect(const DetectedObject& object) {
+    return cv::Rect(object.x, object.y, object.width, object.height);
+}
+
+static int best_object_index(const DetectorResult& detector_result) {
+    if (detector_result.objects.empty()) {
+        return -1;
+    }
+
+    int best_index = 0;
+    double best_confidence = detector_result.objects[0].confidence;
+
+    for (std::size_t i = 1; i < detector_result.objects.size(); i++) {
+        if (detector_result.objects[i].confidence > best_confidence) {
+            best_confidence = detector_result.objects[i].confidence;
+            best_index = static_cast<int>(i);
+        }
+    }
+
+    return best_index;
+}
+
+static void draw_object(cv::Mat& image, const DetectedObject& object) {
+    cv::Rect rect = clamp_rect(object_rect(object), image.cols, image.rows);
+
+    if (rect.width <= 0 || rect.height <= 0) {
+        return;
+    }
+
+    cv::Scalar box_color(0, 255, 0);
+    cv::Scalar fill_color(0, 128, 0);
+    cv::Scalar text_color(255, 255, 255);
+
+    cv::rectangle(image, rect, box_color, 2);
+
+    std::ostringstream label;
+    label << object.label << " " << std::fixed << std::setprecision(2) << object.confidence;
+
+    int baseline = 0;
+    cv::Size text_size = cv::getTextSize(label.str(), cv::FONT_HERSHEY_SIMPLEX, 0.55, 1, &baseline);
+
+    int label_x = rect.x;
+    int label_y = std::max(0, rect.y - text_size.height - 8);
+
+    cv::Rect label_bg(
+        label_x,
+        label_y,
+        std::min(text_size.width + 8, image.cols - label_x),
+        text_size.height + baseline + 8
+    );
+
+    if (label_bg.width > 0 && label_bg.height > 0) {
+        cv::rectangle(image, label_bg, fill_color, cv::FILLED);
+        cv::putText(
+            image,
+            label.str(),
+            cv::Point(label_x + 4, label_y + text_size.height + 2),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.55,
+            text_color,
+            1,
+            cv::LINE_AA
+        );
+    }
 }
 
 static void draw_objects(cv::Mat& image, const DetectorResult& detector_result) {
     for (const auto& object : detector_result.objects) {
-        cv::Rect rect(
-            std::max(0, object.x),
-            std::max(0, object.y),
-            std::max(1, object.width),
-            std::max(1, object.height)
-        );
-
-        rect &= cv::Rect(0, 0, image.cols, image.rows);
-
-        if (rect.width <= 0 || rect.height <= 0) {
-            continue;
-        }
-
-        cv::rectangle(image, rect, cv::Scalar(0, 255, 0), 2);
-
-        std::ostringstream label;
-        label << object.label << " " << std::fixed << std::setprecision(2) << object.confidence;
-
-        int baseline = 0;
-        cv::Size text_size = cv::getTextSize(label.str(), cv::FONT_HERSHEY_SIMPLEX, 0.55, 1, &baseline);
-
-        int text_x = rect.x;
-        int text_y = std::max(0, rect.y - text_size.height - 6);
-
-        cv::Rect bg_rect(
-            text_x,
-            text_y,
-            std::min(text_size.width + 8, image.cols - text_x),
-            text_size.height + baseline + 8
-        );
-
-        if (bg_rect.width > 0 && bg_rect.height > 0) {
-            cv::rectangle(image, bg_rect, cv::Scalar(0, 120, 0), cv::FILLED);
-            cv::putText(
-                image,
-                label.str(),
-                cv::Point(text_x + 4, text_y + text_size.height + 2),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.55,
-                cv::Scalar(255, 255, 255),
-                1,
-                cv::LINE_AA
-            );
-        }
+        draw_object(image, object);
     }
 }
 
-static cv::Mat crop_object(const cv::Mat& image, const DetectedObject& object, int padding) {
-    int x = std::max(0, object.x - padding);
-    int y = std::max(0, object.y - padding);
-    int right = std::min(image.cols, object.x + object.width + padding);
-    int bottom = std::min(image.rows, object.y + object.height + padding);
+static std::string object_json(const DetectedObject& object, int id) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3);
 
-    int width = std::max(1, right - x);
-    int height = std::max(1, bottom - y);
+    ss << "{";
+    ss << "\"id\":" << id << ",";
+    ss << "\"label\":\"" << json_escape(object.label) << "\",";
+    ss << "\"class_id\":" << object.class_id << ",";
+    ss << "\"confidence\":" << object.confidence << ",";
+    ss << "\"x\":" << object.x << ",";
+    ss << "\"y\":" << object.y << ",";
+    ss << "\"width\":" << object.width << ",";
+    ss << "\"height\":" << object.height;
+    ss << "}";
 
-    cv::Rect rect(x, y, width, height);
-    return image(rect).clone();
+    return ss.str();
 }
 
-static bool write_event_json(
-    const std::string& path,
+static std::string event_json(
     const DetectorResult& detector_result,
-    const DetectedObject& object,
     std::uint64_t frame_id,
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
     double ai_stability_loss
 ) {
-    std::ofstream file(path, std::ios::out | std::ios::trunc);
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3);
 
-    if (!file.is_open()) {
-        return false;
+    int best_index = best_object_index(detector_result);
+
+    ss << "{";
+    ss << "\"event_type\":\"object_detection\",";
+    ss << "\"frame_id\":" << frame_id << ",";
+    ss << "\"object_count\":" << detector_result.objects.size() << ",";
+    ss << "\"reference_ai_confidence\":" << reference_ai_confidence << ",";
+    ss << "\"compressed_ai_confidence\":" << compressed_ai_confidence << ",";
+    ss << "\"detector_confidence_loss\":" << detector_confidence_loss << ",";
+    ss << "\"ai_stability_loss\":" << ai_stability_loss << ",";
+    ss << "\"detector_used_dnn\":" << (detector_result.used_dnn ? "true" : "false") << ",";
+    ss << "\"raw_candidate_count\":" << detector_result.raw_candidate_count << ",";
+    ss << "\"max_raw_confidence\":" << detector_result.max_raw_confidence << ",";
+
+    ss << "\"primary_object\":";
+    if (best_index >= 0) {
+        ss << object_json(detector_result.objects[static_cast<std::size_t>(best_index)], best_index);
+    } else {
+        ss << "{}";
     }
 
-    file << std::fixed << std::setprecision(3);
-    file << "{";
-    file << "\"frame_id\":" << frame_id << ",";
-    file << "\"object_count\":" << detector_result.objects.size() << ",";
-    file << "\"primary_object\":{";
-    file << "\"label\":\"" << object.label << "\",";
-    file << "\"class_id\":" << object.class_id << ",";
-    file << "\"confidence\":" << object.confidence << ",";
-    file << "\"x\":" << object.x << ",";
-    file << "\"y\":" << object.y << ",";
-    file << "\"width\":" << object.width << ",";
-    file << "\"height\":" << object.height;
-    file << "},";
-    file << "\"reference_ai_confidence\":" << reference_ai_confidence << ",";
-    file << "\"compressed_ai_confidence\":" << compressed_ai_confidence << ",";
-    file << "\"detector_confidence_loss\":" << detector_confidence_loss << ",";
-    file << "\"ai_stability_loss\":" << ai_stability_loss << ",";
-    file << "\"objects\":[";
+    ss << ",";
+    ss << "\"objects\":[";
 
     for (std::size_t i = 0; i < detector_result.objects.size(); i++) {
-        const auto& item = detector_result.objects[i];
-
-        file << "{";
-        file << "\"label\":\"" << item.label << "\",";
-        file << "\"class_id\":" << item.class_id << ",";
-        file << "\"confidence\":" << item.confidence << ",";
-        file << "\"x\":" << item.x << ",";
-        file << "\"y\":" << item.y << ",";
-        file << "\"width\":" << item.width << ",";
-        file << "\"height\":" << item.height;
-        file << "}";
+        ss << object_json(detector_result.objects[i], static_cast<int>(i));
 
         if (i + 1 < detector_result.objects.size()) {
-            file << ",";
+            ss << ",";
         }
     }
 
-    file << "]";
-    file << "}";
+    ss << "]";
+    ss << "}";
 
-    return true;
+    return ss.str();
+}
+
+static void append_jsonl(const fs::path& path, const std::string& line) {
+    std::ofstream file(path, std::ios::out | std::ios::app);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    file << line << "\n";
+}
+
+static void write_text_file(const fs::path& path, const std::string& text) {
+    std::ofstream file(path, std::ios::out | std::ios::trunc);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    file << text;
 }
 
 bool write_detection_event_snapshot(
@@ -163,36 +228,52 @@ bool write_detection_event_snapshot(
         return false;
     }
 
-    cv::Mat reference = frame_to_mat(reference_frame);
-    cv::Mat reconstructed = frame_to_mat(reconstructed_frame);
+    fs::path output_path(output_dir);
+    fs::create_directories(output_path);
 
-    if (reference.empty() || reconstructed.empty()) {
+    cv::Mat reference_image = frame_to_mat(reference_frame);
+    cv::Mat reconstructed_image = frame_to_mat(reconstructed_frame);
+
+    if (reference_image.empty() || reconstructed_image.empty()) {
         return false;
     }
 
-    DetectedObject object = best_object(detector_result);
-
-    cv::Mat annotated_reference = reference.clone();
-    cv::Mat annotated_reconstructed = reconstructed.clone();
-    cv::Mat crop = crop_object(reference, object, 16);
+    cv::Mat annotated_reference = reference_image.clone();
+    cv::Mat annotated_reconstructed = reconstructed_image.clone();
 
     draw_objects(annotated_reference, detector_result);
     draw_objects(annotated_reconstructed, detector_result);
 
-    bool ok = true;
-    ok = cv::imwrite(output_dir + "/latest_detection_frame.jpg", annotated_reference) && ok;
-    ok = cv::imwrite(output_dir + "/latest_detection_crop.jpg", crop) && ok;
-    ok = cv::imwrite(output_dir + "/latest_detection_reconstructed.jpg", annotated_reconstructed) && ok;
-    ok = write_event_json(
-        output_dir + "/latest_detection_event.json",
+    int best_index = best_object_index(detector_result);
+
+    if (best_index < 0) {
+        return false;
+    }
+
+    const DetectedObject& primary = detector_result.objects[static_cast<std::size_t>(best_index)];
+    cv::Rect crop_rect = clamp_rect(object_rect(primary), reference_image.cols, reference_image.rows);
+
+    if (crop_rect.width <= 0 || crop_rect.height <= 0) {
+        return false;
+    }
+
+    cv::Mat crop = reference_image(crop_rect).clone();
+
+    cv::imwrite((output_path / "latest_detection_frame.jpg").string(), annotated_reference);
+    cv::imwrite((output_path / "latest_detection_crop.jpg").string(), crop);
+    cv::imwrite((output_path / "latest_detection_reconstructed.jpg").string(), annotated_reconstructed);
+
+    std::string json = event_json(
         detector_result,
-        object,
         frame_id,
         reference_ai_confidence,
         compressed_ai_confidence,
         detector_confidence_loss,
         ai_stability_loss
-    ) && ok;
+    );
 
-    return ok;
+    write_text_file(output_path / "latest_detection_event.json", json);
+    append_jsonl(output_path / "detection_history.jsonl", json);
+
+    return true;
 }

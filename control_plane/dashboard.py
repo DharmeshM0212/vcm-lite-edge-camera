@@ -6,17 +6,25 @@ from typing import Any
 def fmt(value: Any, digits: int = 2) -> str:
     if value is None:
         return "-"
+
     if isinstance(value, float):
         return f"{value:.{digits}f}"
+
     return str(value)
 
 
 def status_class(metrics: dict[str, Any]) -> str:
     state = str(metrics.get("controller_state", "")).lower()
+
+    if "ai_repair" in state:
+        return "warn"
+
     if "overload" in state:
         return "bad"
-    if "rate" in state or "protect" in state or "low_fps" in state:
+
+    if "rate" in state or "protect" in state or "watch" in state:
         return "warn"
+
     return "ok"
 
 
@@ -39,6 +47,15 @@ def image_card(title: str, endpoint: str, exists: bool) -> str:
     """
 
 
+def primary_object(event: dict[str, Any]) -> dict[str, Any]:
+    obj = event.get("primary_object", {})
+
+    if isinstance(obj, dict):
+        return obj
+
+    return {}
+
+
 def render_event_panel(event: dict[str, Any]) -> str:
     if not event:
         return """
@@ -48,7 +65,7 @@ def render_event_panel(event: dict[str, Any]) -> str:
         </div>
         """
 
-    primary = event.get("primary_object", {})
+    primary = primary_object(event)
     label = escape(str(primary.get("label", "-")))
 
     return f"""
@@ -72,6 +89,9 @@ def render_event_panel(event: dict[str, Any]) -> str:
                 h={fmt(primary.get("height"), 0)}
             </div>
 
+            <div class="key">Objects in event</div>
+            <div class="value">{fmt(event.get("object_count"), 0)}</div>
+
             <div class="key">Reference confidence</div>
             <div class="value">{fmt(event.get("reference_ai_confidence"), 3)}</div>
 
@@ -83,10 +103,55 @@ def render_event_panel(event: dict[str, Any]) -> str:
 
             <div class="key">AI stability loss</div>
             <div class="value">{fmt(event.get("ai_stability_loss"), 3)}</div>
-
-            <div class="key">Objects in frame</div>
-            <div class="value">{fmt(event.get("object_count"), 0)}</div>
         </div>
+    </div>
+    """
+
+
+def render_recent_events_panel(events: list[dict[str, Any]]) -> str:
+    if not events:
+        return """
+        <div class="panel">
+            <h2>Recent Object Events</h2>
+            <p class="muted">No detection history yet. Events will appear when the detector confirms an object.</p>
+        </div>
+        """
+
+    rows = []
+
+    for event in reversed(events[-12:]):
+        obj = primary_object(event)
+        rows.append(
+            f"""
+            <tr>
+                <td>{fmt(event.get("frame_id"), 0)}</td>
+                <td>{escape(str(obj.get("label", "-")))}</td>
+                <td>{fmt(obj.get("confidence"), 3)}</td>
+                <td>{fmt(event.get("object_count"), 0)}</td>
+                <td>{fmt(event.get("ai_stability_loss"), 3)}</td>
+                <td>{fmt(event.get("detector_confidence_loss"), 3)}</td>
+            </tr>
+            """
+        )
+
+    return f"""
+    <div class="panel">
+        <h2>Recent Object Events</h2>
+        <table class="event-table">
+            <thead>
+                <tr>
+                    <th>Frame</th>
+                    <th>Object</th>
+                    <th>Conf.</th>
+                    <th>Count</th>
+                    <th>AI Loss</th>
+                    <th>Conf. Loss</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(rows)}
+            </tbody>
+        </table>
     </div>
     """
 
@@ -117,13 +182,123 @@ def render_webrtc_panel(webrtc: dict[str, Any]) -> str:
     """
 
 
+def render_controller_panel(metrics: dict[str, Any], summary: dict[str, Any]) -> str:
+    controller_state = escape(str(metrics.get("controller_state", "-")))
+
+    return f"""
+    <div class="panel">
+        <h2>Adaptive Controller</h2>
+        <div class="kv">
+            <div class="key">State</div>
+            <div class="value">{controller_state}</div>
+
+            <div class="key">Mode</div>
+            <div class="value">{escape(str(metrics.get("controller_mode", "-")))}</div>
+
+            <div class="key">Reason</div>
+            <div class="value">{escape(str(metrics.get("controller_reason", "-")))}</div>
+
+            <div class="key">Action</div>
+            <div class="value">{escape(str(metrics.get("controller_action", "-")))}</div>
+
+            <div class="key">Detector interval</div>
+            <div class="value">{fmt(metrics.get("detector_interval"), 0)}</div>
+
+            <div class="key">ROI quality</div>
+            <div class="value">{fmt(metrics.get("roi_quality"), 0)}</div>
+
+            <div class="key">Context quality</div>
+            <div class="value">{fmt(metrics.get("context_quality"), 0)}</div>
+
+            <div class="key">Context size</div>
+            <div class="value">{fmt(metrics.get("context_width"), 0)} × {fmt(metrics.get("context_height"), 0)}</div>
+
+            <div class="key">Re-encode allowed</div>
+            <div class="value">{escape(str(metrics.get("reencode_allowed", "-")))}</div>
+
+            <div class="key">Re-encoded</div>
+            <div class="value">{escape(str(metrics.get("reencoded", "-")))}</div>
+
+            <div class="key">Dropped frames</div>
+            <div class="value">{fmt(metrics.get("dropped_frames"), 0)}</div>
+
+            <div class="key">Queue depth</div>
+            <div class="value">{fmt(metrics.get("queue_depth"), 0)}</div>
+
+            <div class="key">Avg bitrate</div>
+            <div class="value">{fmt(summary.get("average_bitrate_kbps"), 1)} kbps</div>
+        </div>
+    </div>
+    """
+
+
+def render_ai_panel(metrics: dict[str, Any], event: dict[str, Any]) -> str:
+    primary = primary_object(event)
+    last_event_frame = event.get("frame_id", "-") if event else "-"
+    last_object = primary.get("label", "-") if event else "-"
+    last_conf = primary.get("confidence", None) if event else None
+
+    detector_status = "ran this frame" if bool(metrics.get("detector_ran", False)) else "scheduled / reused"
+    validation_status = "periodic validation"
+
+    return f"""
+    <div class="panel">
+        <h2>AI / Detector</h2>
+        <div class="kv">
+            <div class="key">Detector status</div>
+            <div class="value">{detector_status}</div>
+
+            <div class="key">Validation status</div>
+            <div class="value">{validation_status}</div>
+
+            <div class="key">Last event frame</div>
+            <div class="value">{fmt(last_event_frame, 0)}</div>
+
+            <div class="key">Last object</div>
+            <div class="value">{escape(str(last_object))}</div>
+
+            <div class="key">Last object confidence</div>
+            <div class="value">{fmt(last_conf, 3)}</div>
+
+            <div class="key">Current detected objects</div>
+            <div class="value">{fmt(metrics.get("detected_object_count"), 0)}</div>
+
+            <div class="key">Detector ran</div>
+            <div class="value">{escape(str(metrics.get("detector_ran", "-")))}</div>
+
+            <div class="key">DNN runtime</div>
+            <div class="value">{escape(str(metrics.get("detector_used_dnn", "-")))}</div>
+
+            <div class="key">Max raw confidence</div>
+            <div class="value">{fmt(metrics.get("max_detector_confidence"), 3)}</div>
+
+            <div class="key">Reference confidence</div>
+            <div class="value">{fmt(metrics.get("reference_ai_confidence"), 3)}</div>
+
+            <div class="key">Compressed confidence</div>
+            <div class="value">{fmt(metrics.get("compressed_ai_confidence"), 3)}</div>
+
+            <div class="key">Detector confidence loss</div>
+            <div class="value">{fmt(metrics.get("detector_confidence_loss"), 3)}</div>
+
+            <div class="key">AI stability loss</div>
+            <div class="value">{fmt(metrics.get("ai_stability_loss"), 3)}</div>
+
+            <div class="key">Mode</div>
+            <div class="value">{escape(str(metrics.get("mode", "-")))}</div>
+        </div>
+    </div>
+    """
+
+
 def render_dashboard(
     metrics: dict[str, Any],
     metadata: dict[str, Any],
     summary: dict[str, Any],
     image_status: dict[str, bool],
     event: dict[str, Any],
-    webrtc: dict[str, Any]
+    webrtc: dict[str, Any],
+    detection_events: list[dict[str, Any]]
 ) -> str:
     state_class = status_class(metrics)
     controller_state = escape(str(metrics.get("controller_state", "-")))
@@ -131,7 +306,10 @@ def render_dashboard(
     isp_profile = escape(str(metrics.get("isp_profile", "-")))
 
     event_panel = render_event_panel(event)
+    recent_events_panel = render_recent_events_panel(detection_events)
     webrtc_panel = render_webrtc_panel(webrtc)
+    controller_panel = render_controller_panel(metrics, summary)
+    ai_panel = render_ai_panel(metrics, event)
 
     detection_frame_card = image_card("Detection Frame", "/image/detection-frame", image_status.get("detection_frame", False))
     detection_crop_card = image_card("Detected Object Crop", "/image/detection-crop", image_status.get("detection_crop", False))
@@ -196,7 +374,7 @@ def render_dashboard(
 
         main {{
             padding: 24px 28px;
-            max-width: 1320px;
+            max-width: 1400px;
             margin: 0 auto;
         }}
 
@@ -342,6 +520,26 @@ def render_dashboard(
             color: var(--muted);
         }}
 
+        .event-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }}
+
+        .event-table th {{
+            text-align: left;
+            color: var(--muted);
+            font-weight: 600;
+            border-bottom: 1px solid var(--line);
+            padding: 8px 6px;
+        }}
+
+        .event-table td {{
+            border-bottom: 1px solid var(--line);
+            padding: 8px 6px;
+            font-weight: 600;
+        }}
+
         footer {{
             color: var(--muted);
             font-size: 12px;
@@ -412,12 +610,15 @@ def render_dashboard(
 
         {webrtc_panel}
 
-        {event_panel}
-
         <div class="image-grid">
             {detection_frame_card}
             {detection_crop_card}
             {detection_reconstructed_card}
+        </div>
+
+        <div class="section-grid">
+            {event_panel}
+            {recent_events_panel}
         </div>
 
         <div class="section-grid">
@@ -447,40 +648,7 @@ def render_dashboard(
                 </div>
             </div>
 
-            <div class="panel">
-                <h2>Controller</h2>
-                <div class="kv">
-                    <div class="key">State</div>
-                    <div class="value">{controller_state}</div>
-
-                    <div class="key">Mode</div>
-                    <div class="value">{escape(str(metrics.get("controller_mode", "-")))}</div>
-
-                    <div class="key">Reason</div>
-                    <div class="value">{escape(str(metrics.get("controller_reason", "-")))}</div>
-
-                    <div class="key">Action</div>
-                    <div class="value">{escape(str(metrics.get("controller_action", "-")))}</div>
-
-                    <div class="key">Detector interval</div>
-                    <div class="value">{fmt(metrics.get("detector_interval"), 0)}</div>
-
-                    <div class="key">Re-encode allowed</div>
-                    <div class="value">{escape(str(metrics.get("reencode_allowed", "-")))}</div>
-
-                    <div class="key">Re-encoded</div>
-                    <div class="value">{escape(str(metrics.get("reencoded", "-")))}</div>
-
-                    <div class="key">Dropped frames</div>
-                    <div class="value">{fmt(metrics.get("dropped_frames"), 0)}</div>
-
-                    <div class="key">Queue depth</div>
-                    <div class="value">{fmt(metrics.get("queue_depth"), 0)}</div>
-
-                    <div class="key">Avg bitrate</div>
-                    <div class="value">{fmt(summary.get("average_bitrate_kbps"), 1)} kbps</div>
-                </div>
-            </div>
+            {controller_panel}
         </div>
 
         <div class="section-grid">
@@ -510,34 +678,7 @@ def render_dashboard(
                 </div>
             </div>
 
-            <div class="panel">
-                <h2>AI / Detector</h2>
-                <div class="kv">
-                    <div class="key">Detected objects</div>
-                    <div class="value">{fmt(metrics.get("detected_object_count"), 0)}</div>
-
-                    <div class="key">Detector ran</div>
-                    <div class="value">{escape(str(metrics.get("detector_ran", "-")))}</div>
-
-                    <div class="key">DNN runtime</div>
-                    <div class="value">{escape(str(metrics.get("detector_used_dnn", "-")))}</div>
-
-                    <div class="key">Max confidence</div>
-                    <div class="value">{fmt(metrics.get("max_detector_confidence"), 3)}</div>
-
-                    <div class="key">Reference confidence</div>
-                    <div class="value">{fmt(metrics.get("reference_ai_confidence"), 3)}</div>
-
-                    <div class="key">Compressed confidence</div>
-                    <div class="value">{fmt(metrics.get("compressed_ai_confidence"), 3)}</div>
-
-                    <div class="key">Detector confidence loss</div>
-                    <div class="value">{fmt(metrics.get("detector_confidence_loss"), 3)}</div>
-
-                    <div class="key">Mode</div>
-                    <div class="value">{mode}</div>
-                </div>
-            </div>
+            {ai_panel}
         </div>
 
         <footer>

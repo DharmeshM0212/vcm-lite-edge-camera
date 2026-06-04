@@ -21,6 +21,7 @@
 #include "system_monitor.hpp"
 #include "semantic_packet.hpp"
 #include "runtime_schedule.hpp"
+#include "target_filter.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -88,6 +89,9 @@ int main(int argc, char** argv) {
     OpenCVDnnDetector ai_detector(model_path, labels_path);
     RateController rate_controller(config);
 
+    TargetFilterPolicy roi_filter_policy = target_filter_roi_policy();
+    TargetFilterPolicy event_filter_policy = target_filter_event_policy();
+
     std::atomic<bool> running(true);
 
     double source_fps = source.fps();
@@ -133,6 +137,13 @@ int main(int argc, char** argv) {
         last_reference_detector_result.detector_ran = false;
         last_reference_detector_result.raw_candidate_count = 0;
         last_reference_detector_result.max_raw_confidence = 0.0;
+
+        DetectorResult last_event_detector_result;
+        last_event_detector_result.mean_confidence = 0.0;
+        last_event_detector_result.used_dnn = false;
+        last_event_detector_result.detector_ran = false;
+        last_event_detector_result.raw_candidate_count = 0;
+        last_event_detector_result.max_raw_confidence = 0.0;
 
         DetectorResult last_compressed_detector_result;
         last_compressed_detector_result.mean_confidence = 0.0;
@@ -210,7 +221,19 @@ int main(int argc, char** argv) {
                 detector_ran_this_frame = run_detector;
 
                 if (run_detector) {
-                    last_reference_detector_result = ai_detector.detect(tuned_frame, motion_roi_result);
+                    DetectorResult raw_reference_detector_result =
+                        ai_detector.detect(tuned_frame, motion_roi_result);
+
+                    last_reference_detector_result = filter_task_relevant_objects(
+                        raw_reference_detector_result,
+                        roi_filter_policy
+                    );
+
+                    last_event_detector_result = filter_task_relevant_objects(
+                        raw_reference_detector_result,
+                        event_filter_policy
+                    );
+
                     last_detector_frame_id = maybe_frame->id;
                     has_detector_frame = true;
                 }
@@ -311,7 +334,14 @@ int main(int argc, char** argv) {
                 );
 
                 if (compressed_validation_ran_this_frame) {
-                    last_compressed_detector_result = ai_detector.detect(final_reconstructed_frame, roi_result);
+                    DetectorResult raw_compressed_detector_result =
+                        ai_detector.detect(final_reconstructed_frame, roi_result);
+
+                    last_compressed_detector_result = filter_task_relevant_objects(
+                        raw_compressed_detector_result,
+                        roi_filter_policy
+                    );
+
                     compressed_ai_confidence = last_compressed_detector_result.mean_confidence;
                     current_detector_confidence_loss = detector_confidence_loss(
                         reference_ai_confidence,
@@ -395,10 +425,16 @@ int main(int argc, char** argv) {
                     double repaired_detector_loss = current_detector_confidence_loss;
 
                     if (compressed_validation_ran_this_frame) {
-                        repaired_compressed_detector_result = ai_detector.detect(
+                        DetectorResult raw_repaired_detector_result = ai_detector.detect(
                             repaired_reconstructed_frame,
                             roi_result
                         );
+
+                        repaired_compressed_detector_result = filter_task_relevant_objects(
+                            raw_repaired_detector_result,
+                            roi_filter_policy
+                        );
+
                         repaired_compressed_confidence = repaired_compressed_detector_result.mean_confidence;
                         repaired_detector_loss = detector_confidence_loss(
                             reference_ai_confidence,
@@ -579,13 +615,13 @@ int main(int argc, char** argv) {
                 if (should_write_detection_event(
                         maybe_frame->id,
                         detector_ran_this_frame,
-                        !last_reference_detector_result.objects.empty(),
+                        !last_event_detector_result.objects.empty(),
                         runtime_schedule
                     )) {
                     write_detection_event_snapshot(
                         tuned_frame,
                         final_reconstructed_frame,
-                        last_reference_detector_result,
+                        last_event_detector_result,
                         maybe_frame->id,
                         reference_ai_confidence,
                         compressed_ai_confidence,

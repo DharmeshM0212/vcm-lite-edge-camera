@@ -13,6 +13,9 @@ from av import VideoFrame
 from http_signaling import HttpSignaling
 
 
+RAW_FRAME_MAGIC = b"VCMR"
+
+
 async def wait_for_ice_gathering_complete(pc: RTCPeerConnection) -> None:
     if pc.iceGatheringState == "complete":
         return
@@ -53,17 +56,32 @@ class FrameSocketServer:
                 pass
             print("frame_socket_client_disconnected:", peer)
 
-    async def broadcast_jpeg(self, image) -> None:
+    async def broadcast_frame(self, image) -> None:
         if not self.clients:
             return
 
-        ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-
-        if not ok:
+        if image is None or image.size == 0:
             return
 
-        payload = encoded.tobytes()
-        header = struct.pack("!I", len(payload))
+        if not image.flags["C_CONTIGUOUS"]:
+            image = image.copy()
+
+        height, width = image.shape[:2]
+
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            height, width = image.shape[:2]
+
+        channels = image.shape[2]
+
+        if channels != 3:
+            image = image[:, :, :3].copy()
+            channels = 3
+
+        payload = image.tobytes()
+        payload_size = len(payload)
+
+        header = RAW_FRAME_MAGIC + struct.pack("!IIII", int(width), int(height), int(channels), int(payload_size))
         packet = header + payload
 
         dead_clients = []
@@ -91,7 +109,13 @@ def write_jsonl(path: Path, data: dict[str, Any]) -> None:
         file.write(json.dumps(data) + "\n")
 
 
-async def consume_video(track, output_dir: Path, log_path: Path, frame_server: FrameSocketServer, save_debug_frames: bool) -> None:
+async def consume_video(
+    track,
+    output_dir: Path,
+    log_path: Path,
+    frame_server: FrameSocketServer,
+    save_debug_frames: bool
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     frame_count = 0
@@ -114,9 +138,9 @@ async def consume_video(track, output_dir: Path, log_path: Path, frame_server: F
             window_frames = 0
             window_start = now
 
-        await frame_server.broadcast_jpeg(image)
+        await frame_server.broadcast_frame(image)
 
-        if save_debug_frames and frame_count % 5 == 0:
+        if save_debug_frames and frame_count % 10 == 0:
             cv2.imwrite(str(output_dir / "latest_webrtc_frame.jpg"), image)
 
         write_jsonl(
@@ -128,11 +152,22 @@ async def consume_video(track, output_dir: Path, log_path: Path, frame_server: F
                 "width": int(image.shape[1]),
                 "height": int(image.shape[0]),
                 "socket_clients": len(frame_server.clients),
+                "bridge_format": "raw_bgr",
+                "raw_frame_bytes": int(image.shape[0] * image.shape[1] * image.shape[2]),
             },
         )
 
         if frame_count % 30 == 0:
-            print("received_frames:", frame_count, "fps:", round(fps, 2), "socket_clients:", len(frame_server.clients))
+            print(
+                "received_frames:",
+                frame_count,
+                "fps:",
+                round(fps, 2),
+                "socket_clients:",
+                len(frame_server.clients),
+                "bridge:",
+                "raw_bgr",
+            )
 
 
 async def run(args: argparse.Namespace) -> None:

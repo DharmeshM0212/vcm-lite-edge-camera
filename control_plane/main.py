@@ -52,6 +52,31 @@ def read_json_file(path: Path) -> dict[str, Any]:
         return {}
 
 
+def read_recent_jsonl_file(path: Path, limit: int) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    records: list[dict[str, Any]] = []
+
+    for line in reversed(lines):
+        stripped = line.strip()
+
+        if not stripped:
+            continue
+
+        try:
+            records.append(json.loads(stripped))
+        except json.JSONDecodeError:
+            continue
+
+        if len(records) >= limit:
+            break
+
+    records.reverse()
+    return records
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     metrics_path = Path(state["metrics_log_path"])
@@ -67,9 +92,11 @@ def health() -> dict[str, Any]:
         "webrtc_log_exists": webrtc_path.exists(),
         "output_dir_exists": output_dir.exists(),
         "detection_event_exists": (output_dir / "latest_detection_event.json").exists(),
+        "detection_history_exists": (output_dir / "detection_history.jsonl").exists(),
         "detection_frame_exists": (output_dir / "latest_detection_frame.jpg").exists(),
         "detection_crop_exists": (output_dir / "latest_detection_crop.jpg").exists(),
         "detection_reconstructed_exists": (output_dir / "latest_detection_reconstructed.jpg").exists(),
+        "semantic_packet_exists": (output_dir / "latest_semantic_packet.json").exists(),
         "metrics_log_path": str(metrics_path),
         "metadata_log_path": str(metadata_path),
         "webrtc_log_path": str(webrtc_path),
@@ -81,6 +108,7 @@ def health() -> dict[str, Any]:
 def set_log_paths(config: LogConfig) -> dict[str, Any]:
     state["metrics_log_path"] = config.metrics_log_path
     state["metadata_log_path"] = config.metadata_log_path
+
     return {
         "metrics_log_path": state["metrics_log_path"],
         "metadata_log_path": state["metadata_log_path"]
@@ -113,6 +141,13 @@ def webrtc_summary(limit: int = 200) -> dict[str, Any]:
 def latest_detection_event() -> dict[str, Any]:
     output_dir = Path(state["output_dir"])
     return read_json_file(output_dir / "latest_detection_event.json")
+
+
+@app.get("/events/recent")
+def recent_detection_events(limit: int = 20) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 100))
+    output_dir = Path(state["output_dir"])
+    return read_recent_jsonl_file(output_dir / "detection_history.jsonl", safe_limit)
 
 
 @app.get("/metrics/recent")
@@ -167,6 +202,7 @@ def dashboard() -> HTMLResponse:
 
     output_dir = Path(state["output_dir"])
     event = read_json_file(output_dir / "latest_detection_event.json")
+    detection_events = read_recent_jsonl_file(output_dir / "detection_history.jsonl", 20)
 
     image_status = {
         "detection_frame": (output_dir / "latest_detection_frame.jpg").exists(),
@@ -174,4 +210,14 @@ def dashboard() -> HTMLResponse:
         "detection_reconstructed": (output_dir / "latest_detection_reconstructed.jpg").exists()
     }
 
-    return HTMLResponse(render_dashboard(metrics, metadata, summary_data, image_status, event, webrtc_data))
+    return HTMLResponse(
+        render_dashboard(
+            metrics,
+            metadata,
+            summary_data,
+            image_status,
+            event,
+            webrtc_data,
+            detection_events
+        )
+    )

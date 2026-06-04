@@ -13,3 +13,9 @@ models/*.onnx
 models/*.pt
 
 webrtc_signaling/session.json
+
+assets/videos/demo/*.mp4
+assets/videos/demo/*.mov
+assets/videos/demo/*.avi
+assets/videos/demo/*.mkv
+assets/videos/demo/*.webm

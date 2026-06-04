@@ -63,6 +63,14 @@ static std::pair<std::string, int> parse_tcp_uri(const std::string& uri) {
     return {host, port};
 }
 
+static std::uint32_t read_u32_be(const unsigned char* data) {
+    return
+        (static_cast<std::uint32_t>(data[0]) << 24) |
+        (static_cast<std::uint32_t>(data[1]) << 16) |
+        (static_cast<std::uint32_t>(data[2]) << 8) |
+        static_cast<std::uint32_t>(data[3]);
+}
+
 VideoSource::VideoSource(const std::string& path)
     : mode_(SourceMode::VideoFile),
       path_(path),
@@ -230,6 +238,7 @@ bool VideoSource::connect_socket_source(const std::string& uri) {
         if (result == 0) {
             socket_handle_ = static_cast<std::uintptr_t>(sock);
             std::cerr << "frame_socket_connected:" << host << ":" << port << std::endl;
+            std::cerr << "frame_socket_format:raw_bgr" << std::endl;
             return true;
         }
 
@@ -292,37 +301,60 @@ bool VideoSource::recv_all(unsigned char* data, std::size_t size) {
 }
 
 std::optional<Frame> VideoSource::read_socket_frame() {
-    unsigned char header[4];
+    unsigned char header[20];
 
-    if (!recv_all(header, 4)) {
+    if (!recv_all(header, sizeof(header))) {
         opened_ = false;
         return std::nullopt;
     }
 
-    std::uint32_t size =
-        (static_cast<std::uint32_t>(header[0]) << 24) |
-        (static_cast<std::uint32_t>(header[1]) << 16) |
-        (static_cast<std::uint32_t>(header[2]) << 8) |
-        static_cast<std::uint32_t>(header[3]);
-
-    if (size == 0 || size > 20 * 1024 * 1024) {
+    if (!(header[0] == 'V' && header[1] == 'C' && header[2] == 'M' && header[3] == 'R')) {
+        std::cerr << "invalid_raw_frame_magic" << std::endl;
         opened_ = false;
         return std::nullopt;
     }
 
-    std::vector<unsigned char> buffer(size);
+    std::uint32_t width = read_u32_be(header + 4);
+    std::uint32_t height = read_u32_be(header + 8);
+    std::uint32_t channels = read_u32_be(header + 12);
+    std::uint32_t payload_size = read_u32_be(header + 16);
+
+    if (width == 0 || height == 0 || channels != 3) {
+        std::cerr << "invalid_raw_frame_shape:" << width << "x" << height << "x" << channels << std::endl;
+        opened_ = false;
+        return std::nullopt;
+    }
+
+    std::uint64_t expected_size =
+        static_cast<std::uint64_t>(width) *
+        static_cast<std::uint64_t>(height) *
+        static_cast<std::uint64_t>(channels);
+
+    if (expected_size != payload_size || payload_size > 64 * 1024 * 1024) {
+        std::cerr << "invalid_raw_frame_payload_size:"
+                  << payload_size
+                  << " expected:"
+                  << expected_size
+                  << std::endl;
+        opened_ = false;
+        return std::nullopt;
+    }
+
+    std::vector<unsigned char> buffer(payload_size);
 
     if (!recv_all(buffer.data(), buffer.size())) {
         opened_ = false;
         return std::nullopt;
     }
 
-    cv::Mat encoded(1, static_cast<int>(buffer.size()), CV_8UC1, buffer.data());
-    cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+    cv::Mat image(
+        static_cast<int>(height),
+        static_cast<int>(width),
+        CV_8UC3,
+        buffer.data()
+    );
 
-    if (image.empty()) {
-        return std::nullopt;
-    }
+    cv::Mat owned_image = image.clone();
 
-    return mat_to_frame(image, frame_id_++);
+    return mat_to_frame(owned_image, frame_id_++);
 }
