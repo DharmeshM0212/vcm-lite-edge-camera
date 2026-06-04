@@ -20,6 +20,7 @@
 #include "detection_event_writer.hpp"
 #include "system_monitor.hpp"
 #include "semantic_packet.hpp"
+#include "runtime_schedule.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -56,8 +57,9 @@ int main(int argc, char** argv) {
     if (argc >= 6) {
         labels_path = argv[5];
     }
+
     if (argc >= 7) {
-    output_dir = argv[6];
+        output_dir = argv[6];
     }
 
     VideoSource source(video_path);
@@ -116,6 +118,13 @@ int main(int argc, char** argv) {
         double measured_fps = 0.0;
         double previous_bitrate_kbps = 0.0;
         double previous_ai_stability_loss = 0.0;
+
+        RuntimeSchedule runtime_schedule = default_runtime_schedule();
+        double cached_compressed_ai_confidence = 0.0;
+        double cached_detector_confidence_loss = 0.0;
+        double cached_ai_stability_loss = 0.0;
+        bool compressed_validation_ran_this_frame = false;
+
         ProcessMonitor process_monitor;
 
         DetectorResult last_reference_detector_result;
@@ -173,10 +182,30 @@ int main(int argc, char** argv) {
 
                 RoiResult motion_roi_result = motion_detector.detect(tuned_frame);
 
-                bool warmup_detector = maybe_frame->id < 30;
-                bool scheduled_detector = maybe_frame->id % static_cast<std::uint64_t>(std::max(1, controller_output.detector_interval)) == 0;
-                bool force_detector_on_ai_loss = previous_ai_stability_loss > 0.75 * config.confidence_loss_threshold;
-                bool run_detector = warmup_detector || scheduled_detector || force_detector_on_ai_loss;
+                int effective_detector_interval = std::max(
+                    controller_output.detector_interval,
+                    runtime_schedule.minimum_detector_interval
+                );
+
+                if (controller_output.controller_mode == "realtime" ||
+                    controller_output.controller_mode == "realtime_protect") {
+                    effective_detector_interval = std::max(
+                        effective_detector_interval,
+                        runtime_schedule.overload_detector_interval
+                    );
+                }
+
+                bool warmup_detector =
+                    maybe_frame->id < static_cast<std::uint64_t>(runtime_schedule.warmup_detector_frames);
+
+                bool scheduled_detector =
+                    maybe_frame->id % static_cast<std::uint64_t>(std::max(1, effective_detector_interval)) == 0;
+
+                bool force_detector_on_ai_loss =
+                    previous_ai_stability_loss > 0.75 * config.confidence_loss_threshold;
+
+                bool run_detector =
+                    warmup_detector || scheduled_detector || force_detector_on_ai_loss;
 
                 detector_ran_this_frame = run_detector;
 
@@ -186,8 +215,13 @@ int main(int argc, char** argv) {
                     has_detector_frame = true;
                 }
 
-                std::uint64_t detector_age = has_detector_frame ? maybe_frame->id - last_detector_frame_id : 999999;
-                bool object_roi_fresh = has_detector_frame && detector_age <= 5 && !last_reference_detector_result.objects.empty();
+                std::uint64_t detector_age =
+                    has_detector_frame ? maybe_frame->id - last_detector_frame_id : 999999;
+
+                bool object_roi_fresh =
+                    has_detector_frame &&
+                    detector_age <= 5 &&
+                    !last_reference_detector_result.objects.empty();
 
                 DetectorResult roi_source_detector_result = last_reference_detector_result;
 
@@ -206,6 +240,7 @@ int main(int argc, char** argv) {
                 );
 
                 double current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
+
                 RateControllerInput controller_input;
                 controller_input.latency_ms = latency_ms;
                 controller_input.roi_area_ratio = current_roi_area_ratio;
@@ -230,6 +265,7 @@ int main(int argc, char** argv) {
                 );
 
                 Frame context_frame = make_context_frame(tuned_frame, controller_output.context_width);
+
                 PackedRoiTile roi_tile = pack_roi_tile(
                     tuned_frame,
                     roi_result,
@@ -258,24 +294,68 @@ int main(int argc, char** argv) {
                     tuned_frame.width,
                     tuned_frame.height
                 );
+
                 Frame final_decoded_roi_tile = decoded_roi_tile;
                 Frame final_reconstructed_frame = reconstructed_frame;
 
-                if (run_detector) {
-                    last_compressed_detector_result = ai_detector.detect(reconstructed_frame, roi_result);
+                double reference_ai_confidence = last_reference_detector_result.mean_confidence;
+                double compressed_ai_confidence = cached_compressed_ai_confidence;
+                double current_detector_confidence_loss = cached_detector_confidence_loss;
+
+                compressed_validation_ran_this_frame = should_run_compressed_validation(
+                    maybe_frame->id,
+                    detector_ran_this_frame,
+                    previous_ai_stability_loss,
+                    config.confidence_loss_threshold,
+                    runtime_schedule
+                );
+
+                if (compressed_validation_ran_this_frame) {
+                    last_compressed_detector_result = ai_detector.detect(final_reconstructed_frame, roi_result);
+                    compressed_ai_confidence = last_compressed_detector_result.mean_confidence;
+                    current_detector_confidence_loss = detector_confidence_loss(
+                        reference_ai_confidence,
+                        compressed_ai_confidence
+                    );
+
+                    cached_compressed_ai_confidence = compressed_ai_confidence;
+                    cached_detector_confidence_loss = current_detector_confidence_loss;
                 }
 
                 StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
-                double reference_ai_confidence = last_reference_detector_result.mean_confidence;
-                double compressed_ai_confidence = last_compressed_detector_result.mean_confidence;
-                double current_detector_confidence_loss = detector_confidence_loss(reference_ai_confidence, compressed_ai_confidence);
 
-                if (last_reference_detector_result.used_dnn || last_compressed_detector_result.used_dnn) {
-                    stability.total_loss = std::clamp(0.35 * stability.total_loss + 0.65 * current_detector_confidence_loss, 0.0, 1.0);
+                if (compressed_validation_ran_this_frame &&
+                    (last_reference_detector_result.used_dnn || last_compressed_detector_result.used_dnn)) {
+                    stability.total_loss = std::clamp(
+                        0.35 * stability.total_loss + 0.65 * current_detector_confidence_loss,
+                        0.0,
+                        1.0
+                    );
+                    cached_ai_stability_loss = stability.total_loss;
+                } else if (!compressed_validation_ran_this_frame) {
+                    stability.total_loss = std::clamp(
+                        0.50 * stability.total_loss + 0.50 * cached_ai_stability_loss,
+                        0.0,
+                        1.0
+                    );
+
+                    compressed_ai_confidence = cached_compressed_ai_confidence;
+                    current_detector_confidence_loss = cached_detector_confidence_loss;
                 } else {
                     stability.total_loss = std::clamp(stability.total_loss, 0.0, 1.0);
-                    compressed_ai_confidence = std::clamp(reference_ai_confidence * (1.0 - stability.total_loss), 0.0, 1.0);
-                    current_detector_confidence_loss = detector_confidence_loss(reference_ai_confidence, compressed_ai_confidence);
+                    compressed_ai_confidence = std::clamp(
+                        reference_ai_confidence * (1.0 - stability.total_loss),
+                        0.0,
+                        1.0
+                    );
+                    current_detector_confidence_loss = detector_confidence_loss(
+                        reference_ai_confidence,
+                        compressed_ai_confidence
+                    );
+
+                    cached_compressed_ai_confidence = compressed_ai_confidence;
+                    cached_detector_confidence_loss = current_detector_confidence_loss;
+                    cached_ai_stability_loss = stability.total_loss;
                 }
 
                 double initial_stability_loss = stability.total_loss;
@@ -306,25 +386,49 @@ int main(int argc, char** argv) {
                         tuned_frame.width,
                         tuned_frame.height
                     );
+
                     final_decoded_roi_tile = repaired_decoded_roi_tile;
                     final_reconstructed_frame = repaired_reconstructed_frame;
 
                     DetectorResult repaired_compressed_detector_result = last_compressed_detector_result;
+                    double repaired_compressed_confidence = compressed_ai_confidence;
+                    double repaired_detector_loss = current_detector_confidence_loss;
 
-                    if (run_detector) {
-                        repaired_compressed_detector_result = ai_detector.detect(repaired_reconstructed_frame, roi_result);
+                    if (compressed_validation_ran_this_frame) {
+                        repaired_compressed_detector_result = ai_detector.detect(
+                            repaired_reconstructed_frame,
+                            roi_result
+                        );
+                        repaired_compressed_confidence = repaired_compressed_detector_result.mean_confidence;
+                        repaired_detector_loss = detector_confidence_loss(
+                            reference_ai_confidence,
+                            repaired_compressed_confidence
+                        );
                     }
 
-                    StabilityResult repaired_stability = compute_roi_stability_loss(roi_tile.tile, repaired_roi_tile_jpeg);
-                    double repaired_compressed_confidence = repaired_compressed_detector_result.mean_confidence;
-                    double repaired_detector_loss = detector_confidence_loss(reference_ai_confidence, repaired_compressed_confidence);
+                    StabilityResult repaired_stability = compute_roi_stability_loss(
+                        roi_tile.tile,
+                        repaired_roi_tile_jpeg
+                    );
 
-                    if (last_reference_detector_result.used_dnn || repaired_compressed_detector_result.used_dnn) {
-                        repaired_stability.total_loss = std::clamp(0.35 * repaired_stability.total_loss + 0.65 * repaired_detector_loss, 0.0, 1.0);
+                    if (compressed_validation_ran_this_frame &&
+                        (last_reference_detector_result.used_dnn || repaired_compressed_detector_result.used_dnn)) {
+                        repaired_stability.total_loss = std::clamp(
+                            0.35 * repaired_stability.total_loss + 0.65 * repaired_detector_loss,
+                            0.0,
+                            1.0
+                        );
                     } else {
                         repaired_stability.total_loss = std::clamp(repaired_stability.total_loss, 0.0, 1.0);
-                        repaired_compressed_confidence = std::clamp(reference_ai_confidence * (1.0 - repaired_stability.total_loss), 0.0, 1.0);
-                        repaired_detector_loss = detector_confidence_loss(reference_ai_confidence, repaired_compressed_confidence);
+                        repaired_compressed_confidence = std::clamp(
+                            reference_ai_confidence * (1.0 - repaired_stability.total_loss),
+                            0.0,
+                            1.0
+                        );
+                        repaired_detector_loss = detector_confidence_loss(
+                            reference_ai_confidence,
+                            repaired_compressed_confidence
+                        );
                     }
 
                     if (repaired_stability.total_loss <= stability.total_loss) {
@@ -336,14 +440,20 @@ int main(int argc, char** argv) {
                         final_roi_quality = repaired_quality;
                         reencoded = true;
                         reencode_attempts = 1;
+
+                        cached_compressed_ai_confidence = compressed_ai_confidence;
+                        cached_detector_confidence_loss = current_detector_confidence_loss;
+                        cached_ai_stability_loss = stability.total_loss;
                     }
                 }
 
                 std::size_t total_encoded_bytes = context_jpeg.bytes.size() + roi_tile_jpeg.bytes.size();
+
                 double actual_bitrate_kbps = estimate_frame_bitrate_kbps(
                     total_encoded_bytes,
                     measured_fps > 0.0 ? measured_fps : source_fps
                 );
+
                 SemanticPacketInput semantic_packet_input;
                 semantic_packet_input.frame_id = maybe_frame->id;
                 semantic_packet_input.timestamp_ms = latency_ms;
@@ -366,7 +476,15 @@ int main(int argc, char** argv) {
                 semantic_packet_input.context_jpeg = context_jpeg;
                 semantic_packet_input.roi_tile_jpeg = roi_tile_jpeg;
 
-                write_semantic_packet(semantic_packet_input, output_dir);
+                if (should_write_semantic_packet(
+                        maybe_frame->id,
+                        detector_ran_this_frame,
+                        stability.total_loss,
+                        config.confidence_loss_threshold,
+                        runtime_schedule
+                    )) {
+                    write_semantic_packet(semantic_packet_input, output_dir);
+                }
 
                 previous_bitrate_kbps = actual_bitrate_kbps;
                 previous_ai_stability_loss = stability.total_loss;
@@ -435,7 +553,7 @@ int main(int argc, char** argv) {
                 metrics.context_jpeg_bytes = static_cast<std::uint32_t>(context_jpeg.bytes.size());
                 metrics.roi_tile_jpeg_bytes = static_cast<std::uint32_t>(roi_tile_jpeg.bytes.size());
                 metrics.total_encoded_bytes = static_cast<std::uint32_t>(total_encoded_bytes);
-                metrics.detector_interval = static_cast<std::uint32_t>(controller_output.detector_interval);
+                metrics.detector_interval = static_cast<std::uint32_t>(effective_detector_interval);
                 metrics.reencode_allowed = controller_output.reencode_allowed;
                 metrics.reencoded = reencoded;
                 metrics.reencode_attempts = reencode_attempts;
@@ -458,7 +576,12 @@ int main(int argc, char** argv) {
                     metrics.mode = "motion_detector_fallback";
                 }
 
-                if (detector_ran_this_frame && !last_reference_detector_result.objects.empty()) {
+                if (should_write_detection_event(
+                        maybe_frame->id,
+                        detector_ran_this_frame,
+                        !last_reference_detector_result.objects.empty(),
+                        runtime_schedule
+                    )) {
                     write_detection_event_snapshot(
                         tuned_frame,
                         final_reconstructed_frame,

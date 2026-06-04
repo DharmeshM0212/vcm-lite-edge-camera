@@ -32,6 +32,7 @@ add_executable(vcm_lite_engine
     src/detection_event_writer.cpp
     src/system_monitor.cpp
     src/semantic_packet.cpp
+    src/runtime_schedule.cpp
 )
 
 target_include_directories(vcm_lite_engine PRIVATE include ${OpenCV_INCLUDE_DIRS})
