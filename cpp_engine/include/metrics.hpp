@@ -51,6 +51,9 @@ struct EngineMetrics {
     std::uint32_t final_roi_quality;
     double initial_ai_stability_loss;
     std::string controller_state;
+    std::string controller_mode;
+    std::string controller_reason;
+    std::string controller_action;
     double ai_stability_loss;
     double cpu_percent;
     double ram_mb;

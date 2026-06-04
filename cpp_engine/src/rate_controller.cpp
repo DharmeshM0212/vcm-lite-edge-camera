@@ -4,148 +4,129 @@
 
 RateController::RateController(const EngineConfig& config)
     : config_(config),
-      roi_quality_(85),
-      context_quality_(38),
-      detector_interval_(config.detector_interval),
-      context_width_(320),
-      roi_cell_size_(160),
-      max_rois_(5),
-      previous_dropped_frames_(0) {
+      last_roi_quality_(85),
+      last_context_quality_(40),
+      last_detector_interval_(config.detector_interval),
+      last_context_width_(320),
+      last_roi_cell_size_(160),
+      last_max_rois_(5) {
 }
 
-double RateController::bitrate_error_ratio(double bitrate_kbps) const {
-    double target = static_cast<double>(std::max(1, config_.target_bitrate_kbps));
-    return (bitrate_kbps - target) / target;
-}
-
-bool RateController::is_overloaded(const RateControllerInput& input) const {
-    bool latency_high = input.latency_ms > config_.latency_budget_ms;
-    bool queue_high = input.queue_depth >= 2;
-    bool new_drops = input.dropped_frames > previous_dropped_frames_;
-    return latency_high || queue_high || new_drops;
-}
-
-bool RateController::is_ai_unstable(const RateControllerInput& input) const {
-    return input.previous_ai_stability_loss > config_.confidence_loss_threshold;
-}
-
-bool RateController::is_rate_limited(const RateControllerInput& input) const {
-    return bitrate_error_ratio(input.previous_bitrate_kbps) > 0.08;
+int RateController::clamp_int(int value, int low, int high) const {
+    return std::max(low, std::min(high, value));
 }
 
 RateControllerOutput RateController::update(const RateControllerInput& input) {
-    bool overloaded = is_overloaded(input);
-    bool ai_unstable = is_ai_unstable(input);
-    bool rate_limited = is_rate_limited(input);
-    double bitrate_error = bitrate_error_ratio(input.previous_bitrate_kbps);
-
-    std::string state = "normal";
-
-    if (overloaded && ai_unstable) {
-        state = "overload_ai_protect";
-        context_quality_ -= 8;
-        roi_quality_ += 1;
-        detector_interval_ += 3;
-        context_width_ -= 80;
-        roi_cell_size_ -= 16;
-        max_rois_ = std::max(2, max_rois_ - 1);
-    } else if (overloaded) {
-        state = "overload";
-        context_quality_ -= 8;
-        roi_quality_ -= input.roi_area_ratio < 0.04 ? 2 : 0;
-        detector_interval_ += 3;
-        context_width_ -= 80;
-        roi_cell_size_ -= 24;
-        max_rois_ = std::max(1, max_rois_ - 1);
-    } else if (ai_unstable && rate_limited) {
-        state = "ai_protect_rate_limited";
-        roi_quality_ += 5;
-        context_quality_ -= 8;
-        context_width_ -= 40;
-        roi_cell_size_ = std::max(128, roi_cell_size_ - 8);
-
-        if (detector_interval_ > 1) {
-            detector_interval_ -= 1;
-        }
-    } else if (ai_unstable) {
-        state = "ai_protect";
-        roi_quality_ += 6;
-        context_quality_ -= 2;
-        roi_cell_size_ += 8;
-
-        if (detector_interval_ > 1) {
-            detector_interval_ -= 1;
-        }
-
-        if (input.roi_area_ratio > 0.08) {
-            max_rois_ = std::min(5, max_rois_ + 1);
-        }
-    } else if (rate_limited) {
-        state = "rate_limited";
-        int context_step = bitrate_error > 0.50 ? 8 : 5;
-        context_quality_ -= context_step;
-        context_width_ -= bitrate_error > 0.50 ? 80 : 40;
-        roi_cell_size_ -= bitrate_error > 0.50 ? 16 : 8;
-
-        if (input.roi_area_ratio < 0.03) {
-            roi_quality_ -= 1;
-        }
-
-        detector_interval_ += bitrate_error > 0.50 ? 2 : 1;
-    } else {
-        state = "normal";
-        context_quality_ += 2;
-
-        if (context_width_ < 320) {
-            context_width_ += 20;
-        }
-
-        if (roi_cell_size_ < 160) {
-            roi_cell_size_ += 4;
-        }
-
-        if (input.roi_area_ratio > 0.10) {
-            roi_quality_ += 1;
-            max_rois_ = std::min(5, max_rois_ + 1);
-        } else if (input.roi_area_ratio < 0.02 && input.previous_ai_stability_loss < 0.5 * config_.confidence_loss_threshold) {
-            roi_quality_ -= 1;
-        }
-
-        if (detector_interval_ > config_.detector_interval) {
-            detector_interval_ -= 1;
-        }
-    }
-
-    if (input.estimated_fps < 18.0) {
-        state = state == "normal" ? "low_fps" : state + "_low_fps";
-        context_quality_ -= 4;
-        context_width_ -= 40;
-        roi_cell_size_ -= 8;
-        detector_interval_ += 2;
-    }
-
-    roi_quality_ = std::clamp(roi_quality_, config_.roi_quality_min, config_.roi_quality_max);
-    context_quality_ = std::clamp(context_quality_, config_.context_quality_min, config_.context_quality_max);
-    detector_interval_ = std::clamp(detector_interval_, 1, 30);
-    context_width_ = std::clamp(context_width_, 160, 320);
-    roi_cell_size_ = std::clamp(roi_cell_size_, 96, 192);
-    max_rois_ = std::clamp(max_rois_, 1, 5);
-
-    bool latency_safe = input.latency_ms < 0.65 * config_.latency_budget_ms;
-    bool queue_safe = input.queue_depth == 0;
-    bool drops_safe = input.dropped_frames == previous_dropped_frames_;
-    bool reencode_allowed = latency_safe && queue_safe && drops_safe && !overloaded;
-
-    previous_dropped_frames_ = input.dropped_frames;
-
     RateControllerOutput output;
-    output.roi_quality = roi_quality_;
-    output.context_quality = context_quality_;
-    output.detector_interval = detector_interval_;
-    output.context_width = context_width_;
-    output.roi_cell_size = roi_cell_size_;
-    output.max_rois = max_rois_;
-    output.reencode_allowed = reencode_allowed;
-    output.controller_state = state;
+
+    bool latency_pressure = input.latency_ms > config_.latency_budget_ms;
+    double target_fps = 20.0;
+    bool fps_pressure = input.estimated_fps > 0.1 && input.estimated_fps < target_fps * 0.75;
+    bool queue_pressure = input.queue_depth >= 2;
+    bool dropped_pressure = input.dropped_frames > 0;
+    bool bitrate_pressure = input.previous_bitrate_kbps > config_.target_bitrate_kbps * 1.20;
+    bool ai_pressure = input.previous_ai_stability_loss > config_.confidence_loss_threshold;
+    bool ai_warning = input.previous_ai_stability_loss > 0.60 * config_.confidence_loss_threshold;
+    bool large_roi = input.roi_area_ratio > 0.25;
+
+    output.roi_quality = last_roi_quality_;
+    output.context_quality = last_context_quality_;
+    output.detector_interval = last_detector_interval_;
+    output.context_width = last_context_width_;
+    output.roi_cell_size = last_roi_cell_size_;
+    output.max_rois = last_max_rois_;
+    output.reencode_allowed = true;
+    output.controller_state = "balanced";
+    output.controller_mode = "balanced";
+    output.controller_reason = "nominal latency, bitrate, and AI stability";
+    output.controller_action = "maintain balanced semantic packet settings";
+
+    if (ai_pressure && !(latency_pressure || fps_pressure || queue_pressure)) {
+        output.controller_state = "ai_repair";
+        output.controller_mode = "quality";
+        output.controller_reason = "AI confidence loss exceeded threshold while latency budget remained available";
+        output.controller_action = "increase ROI quality, reduce detector interval, allow re-encode";
+
+        output.roi_quality = clamp_int(last_roi_quality_ + 8, config_.roi_quality_min, config_.roi_quality_max);
+        output.context_quality = clamp_int(last_context_quality_ + 2, config_.context_quality_min, config_.context_quality_max);
+        output.context_width = clamp_int(last_context_width_, 240, 480);
+        output.detector_interval = clamp_int(last_detector_interval_ - 1, 1, config_.detector_interval);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_ + 32, 96, 224);
+        output.max_rois = 5;
+        output.reencode_allowed = true;
+    } else if (ai_pressure && (latency_pressure || fps_pressure || queue_pressure)) {
+        output.controller_state = "overload_ai_protect";
+        output.controller_mode = "realtime_protect";
+        output.controller_reason = "system is overloaded but AI confidence loss is high";
+        output.controller_action = "protect ROI quality while reducing context and disabling re-encode";
+
+        output.roi_quality = clamp_int(last_roi_quality_ + 4, 60, config_.roi_quality_max);
+        output.context_quality = clamp_int(last_context_quality_ - 6, config_.context_quality_min, 35);
+        output.context_width = clamp_int(last_context_width_ - 80, 160, 320);
+        output.detector_interval = clamp_int(last_detector_interval_ + 5, config_.detector_interval, 45);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_, 96, 192);
+        output.max_rois = 5;
+        output.reencode_allowed = false;
+    } else if (latency_pressure || fps_pressure || queue_pressure || dropped_pressure) {
+        output.controller_state = "overload_low_fps";
+        output.controller_mode = "realtime";
+        output.controller_reason = "latency, FPS, queue depth, or dropped-frame pressure detected";
+        output.controller_action = "reduce context resolution and quality, increase detector interval, disable re-encode";
+
+        output.roi_quality = clamp_int(last_roi_quality_ - 5, 55, 78);
+        output.context_quality = clamp_int(last_context_quality_ - 8, config_.context_quality_min, 32);
+        output.context_width = clamp_int(last_context_width_ - 80, 160, 320);
+        output.detector_interval = clamp_int(last_detector_interval_ + 5, config_.detector_interval, 45);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_ - 32, 96, 160);
+        output.max_rois = large_roi ? 3 : 5;
+        output.reencode_allowed = false;
+    } else if (bitrate_pressure) {
+        output.controller_state = "rate_limited";
+        output.controller_mode = "balanced_rate";
+        output.controller_reason = "semantic packet bitrate exceeded target";
+        output.controller_action = "slightly reduce context quality and context resolution while preserving ROI quality";
+
+        output.roi_quality = clamp_int(last_roi_quality_, 65, config_.roi_quality_max);
+        output.context_quality = clamp_int(last_context_quality_ - 5, config_.context_quality_min, config_.context_quality_max);
+        output.context_width = clamp_int(last_context_width_ - 40, 200, 360);
+        output.detector_interval = clamp_int(last_detector_interval_, 1, 30);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_, 96, 192);
+        output.max_rois = 5;
+        output.reencode_allowed = true;
+    } else if (ai_warning) {
+        output.controller_state = "ai_watch";
+        output.controller_mode = "quality_watch";
+        output.controller_reason = "AI confidence loss is rising but has not crossed threshold";
+        output.controller_action = "slightly raise ROI quality and monitor detector confidence";
+
+        output.roi_quality = clamp_int(last_roi_quality_ + 3, config_.roi_quality_min, config_.roi_quality_max);
+        output.context_quality = clamp_int(last_context_quality_, config_.context_quality_min, config_.context_quality_max);
+        output.context_width = clamp_int(last_context_width_, 240, 400);
+        output.detector_interval = clamp_int(last_detector_interval_ - 1, 1, config_.detector_interval);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_, 128, 192);
+        output.max_rois = 5;
+        output.reencode_allowed = true;
+    } else {
+        output.controller_state = "balanced";
+        output.controller_mode = "balanced";
+        output.controller_reason = "system operating within latency, bitrate, and AI-stability targets";
+        output.controller_action = "use balanced context and ROI quality";
+
+        output.roi_quality = clamp_int(last_roi_quality_ + (last_roi_quality_ < 78 ? 2 : -1), 68, 84);
+        output.context_quality = clamp_int(last_context_quality_ + (last_context_quality_ < 38 ? 2 : -1), 28, 45);
+        output.context_width = clamp_int(last_context_width_ + (last_context_width_ < 320 ? 40 : -20), 240, 360);
+        output.detector_interval = clamp_int(config_.detector_interval, 1, 20);
+        output.roi_cell_size = clamp_int(last_roi_cell_size_ + (last_roi_cell_size_ < 160 ? 32 : 0), 128, 192);
+        output.max_rois = 5;
+        output.reencode_allowed = true;
+    }
+
+    last_roi_quality_ = output.roi_quality;
+    last_context_quality_ = output.context_quality;
+    last_detector_interval_ = output.detector_interval;
+    last_context_width_ = output.context_width;
+    last_roi_cell_size_ = output.roi_cell_size;
+    last_max_rois_ = output.max_rois;
+
     return output;
 }

@@ -18,6 +18,8 @@
 #include "video_source.hpp"
 #include "output_writer.hpp"
 #include "detection_event_writer.hpp"
+#include "system_monitor.hpp"
+#include "semantic_packet.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -114,6 +116,7 @@ int main(int argc, char** argv) {
         double measured_fps = 0.0;
         double previous_bitrate_kbps = 0.0;
         double previous_ai_stability_loss = 0.0;
+        ProcessMonitor process_monitor;
 
         DetectorResult last_reference_detector_result;
         last_reference_detector_result.mean_confidence = 0.0;
@@ -142,6 +145,9 @@ int main(int argc, char** argv) {
         controller_output.max_rois = 5;
         controller_output.reencode_allowed = true;
         controller_output.controller_state = "initial";
+        controller_output.controller_mode = "initial";
+        controller_output.controller_reason = "engine startup";
+        controller_output.controller_action = "initialize semantic controller defaults";
 
         while (running.load() || queue.size() > 0) {
             auto maybe_frame = queue.pop();
@@ -338,6 +344,29 @@ int main(int argc, char** argv) {
                     total_encoded_bytes,
                     measured_fps > 0.0 ? measured_fps : source_fps
                 );
+                SemanticPacketInput semantic_packet_input;
+                semantic_packet_input.frame_id = maybe_frame->id;
+                semantic_packet_input.timestamp_ms = latency_ms;
+                semantic_packet_input.frame_width = static_cast<std::uint32_t>(tuned_frame.width);
+                semantic_packet_input.frame_height = static_cast<std::uint32_t>(tuned_frame.height);
+                semantic_packet_input.context_width = static_cast<std::uint32_t>(context_frame.width);
+                semantic_packet_input.context_height = static_cast<std::uint32_t>(context_frame.height);
+                semantic_packet_input.roi_tile_width = static_cast<std::uint32_t>(roi_tile.tile.width);
+                semantic_packet_input.roi_tile_height = static_cast<std::uint32_t>(roi_tile.tile.height);
+                semantic_packet_input.roi_quality = static_cast<std::uint32_t>(final_roi_quality);
+                semantic_packet_input.context_quality = static_cast<std::uint32_t>(encode_result.context_quality);
+                semantic_packet_input.detector_interval = static_cast<std::uint32_t>(controller_output.detector_interval);
+                semantic_packet_input.controller_state = controller_output.controller_state;
+                semantic_packet_input.reference_ai_confidence = reference_ai_confidence;
+                semantic_packet_input.compressed_ai_confidence = compressed_ai_confidence;
+                semantic_packet_input.detector_confidence_loss = current_detector_confidence_loss;
+                semantic_packet_input.ai_stability_loss = stability.total_loss;
+                semantic_packet_input.roi_result = roi_result;
+                semantic_packet_input.detector_result = last_reference_detector_result;
+                semantic_packet_input.context_jpeg = context_jpeg;
+                semantic_packet_input.roi_tile_jpeg = roi_tile_jpeg;
+
+                write_semantic_packet(semantic_packet_input, output_dir);
 
                 previous_bitrate_kbps = actual_bitrate_kbps;
                 previous_ai_stability_loss = stability.total_loss;
@@ -414,9 +443,12 @@ int main(int argc, char** argv) {
                 metrics.final_roi_quality = static_cast<std::uint32_t>(final_roi_quality);
                 metrics.initial_ai_stability_loss = initial_stability_loss;
                 metrics.controller_state = controller_output.controller_state;
+                metrics.controller_mode = controller_output.controller_mode;
+                metrics.controller_reason = controller_output.controller_reason;
+                metrics.controller_action = controller_output.controller_action;
                 metrics.ai_stability_loss = stability.total_loss;
-                metrics.cpu_percent = 0.0;
-                metrics.ram_mb = static_cast<double>(tuned_frame.data.size()) / (1024.0 * 1024.0);
+                metrics.cpu_percent = process_monitor.cpu_percent();
+                metrics.ram_mb = process_monitor.ram_mb();
                 metrics.dropped_frames = static_cast<std::uint32_t>(queue.dropped_count());
                 metrics.queue_depth = static_cast<std::uint32_t>(queue.size());
 

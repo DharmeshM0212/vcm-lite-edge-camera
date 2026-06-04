@@ -21,7 +21,7 @@ def status_class(metrics: dict[str, Any]) -> str:
 
 
 def image_card(title: str, endpoint: str, exists: bool) -> str:
-    version = str(int(time()))
+    version = str(int(time() * 1000))
 
     if not exists:
         return f"""
@@ -91,17 +91,53 @@ def render_event_panel(event: dict[str, Any]) -> str:
     """
 
 
-def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary: dict[str, Any], image_status: dict[str, bool], event: dict[str, Any], webrtc: dict[str, Any]) -> str:
+def render_webrtc_panel(webrtc: dict[str, Any]) -> str:
+    status = "active" if webrtc.get("active", False) else "inactive"
+
+    return f"""
+    <div class="panel">
+        <h2>WebRTC Ingest</h2>
+        <div class="kv">
+            <div class="key">Status</div>
+            <div class="value">{status}</div>
+
+            <div class="key">Receiver frame ID</div>
+            <div class="value">{fmt(webrtc.get("latest_frame_id"), 0)}</div>
+
+            <div class="key">Receiver FPS</div>
+            <div class="value">{fmt(webrtc.get("fps"), 2)}</div>
+
+            <div class="key">Input frame size</div>
+            <div class="value">{fmt(webrtc.get("width"), 0)} × {fmt(webrtc.get("height"), 0)}</div>
+
+            <div class="key">Socket clients</div>
+            <div class="value">{fmt(webrtc.get("socket_clients"), 0)}</div>
+        </div>
+    </div>
+    """
+
+
+def render_dashboard(
+    metrics: dict[str, Any],
+    metadata: dict[str, Any],
+    summary: dict[str, Any],
+    image_status: dict[str, bool],
+    event: dict[str, Any],
+    webrtc: dict[str, Any]
+) -> str:
     state_class = status_class(metrics)
     controller_state = escape(str(metrics.get("controller_state", "-")))
     mode = escape(str(metrics.get("mode", "-")))
     isp_profile = escape(str(metrics.get("isp_profile", "-")))
 
     event_panel = render_event_panel(event)
+    webrtc_panel = render_webrtc_panel(webrtc)
 
     detection_frame_card = image_card("Detection Frame", "/image/detection-frame", image_status.get("detection_frame", False))
     detection_crop_card = image_card("Detected Object Crop", "/image/detection-crop", image_status.get("detection_crop", False))
     detection_reconstructed_card = image_card("Semantic Reconstruction", "/image/detection-reconstructed", image_status.get("detection_reconstructed", False))
+
+    page_version = str(int(time() * 1000))
 
     return f"""
 <!doctype html>
@@ -109,7 +145,14 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
 <head>
     <meta charset="utf-8">
     <title>VCM-Lite Edge Camera</title>
-    <meta http-equiv="refresh" content="2">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <script>
+        setTimeout(function () {{
+            window.location.replace("/dashboard?t={page_version}&r=" + Date.now());
+        }}, 2000);
+    </script>
     <style>
         :root {{
             --bg: #f6f7f9;
@@ -351,8 +394,6 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
                 <div class="metric-value">{fmt(metrics.get("fps"), 2)}</div>
             </div>
 
-            
-
             <div class="panel">
                 <div class="metric-label">Latency</div>
                 <div class="metric-value">{fmt(metrics.get("latency_ms"), 1)}<span class="metric-unit">ms</span></div>
@@ -369,25 +410,7 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
             </div>
         </div>
 
-        <div class="panel">
-            <h2>WebRTC Ingest</h2>
-            <div class="kv">
-                <div class="key">Status</div>
-                <div class="value">{"active" if webrtc.get("active", False) else "inactive"}</div>
-
-                <div class="key">Receiver frame ID</div>
-                <div class="value">{fmt(webrtc.get("latest_frame_id"), 0)}</div>
-
-                <div class="key">Receiver FPS</div>
-                <div class="value">{fmt(webrtc.get("fps"), 2)}</div>
-
-                <div class="key">Input frame size</div>
-                <div class="value">{fmt(webrtc.get("width"), 0)} × {fmt(webrtc.get("height"), 0)}</div>
-
-                <div class="key">Socket clients</div>
-                <div class="value">{fmt(webrtc.get("socket_clients"), 0)}</div>
-            </div>
-        </div>
+        {webrtc_panel}
 
         {event_panel}
 
@@ -429,6 +452,15 @@ def render_dashboard(metrics: dict[str, Any], metadata: dict[str, Any], summary:
                 <div class="kv">
                     <div class="key">State</div>
                     <div class="value">{controller_state}</div>
+
+                    <div class="key">Mode</div>
+                    <div class="value">{escape(str(metrics.get("controller_mode", "-")))}</div>
+
+                    <div class="key">Reason</div>
+                    <div class="value">{escape(str(metrics.get("controller_reason", "-")))}</div>
+
+                    <div class="key">Action</div>
+                    <div class="value">{escape(str(metrics.get("controller_action", "-")))}</div>
 
                     <div class="key">Detector interval</div>
                     <div class="value">{fmt(metrics.get("detector_interval"), 0)}</div>
@@ -524,6 +556,14 @@ def render_empty_dashboard() -> str:
 <head>
     <meta charset="utf-8">
     <title>VCM-Lite Edge Camera</title>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <script>
+        setTimeout(function () {
+            window.location.replace("/dashboard?t=" + Date.now());
+        }, 2000);
+    </script>
     <style>
         body {
             margin: 0;

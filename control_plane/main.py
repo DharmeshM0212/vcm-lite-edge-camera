@@ -19,6 +19,15 @@ DEFAULT_OUTPUT_DIR = ROOT_DIR / "outputs"
 app = FastAPI(title="VCM-Lite Edge Camera Control Plane")
 
 
+@app.middleware("http")
+async def no_cache_middleware(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 class LogConfig(BaseModel):
     metrics_log_path: str = str(DEFAULT_METRICS_LOG)
     metadata_log_path: str = str(DEFAULT_METADATA_LOG)
