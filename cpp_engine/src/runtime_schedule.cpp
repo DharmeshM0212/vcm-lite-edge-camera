@@ -2,23 +2,27 @@
 
 RuntimeSchedule default_runtime_schedule() {
     RuntimeSchedule schedule;
-    schedule.warmup_detector_frames = 5;
-    schedule.compressed_validation_interval = 15;
-    schedule.semantic_packet_interval = 10;
+
+    schedule.warmup_detector_frames = 3;
+    schedule.compressed_validation_interval = 45;
+    schedule.semantic_packet_interval = 30;
     schedule.detection_event_interval = 10;
-    schedule.minimum_detector_interval = 10;
-    schedule.overload_detector_interval = 30;
+    schedule.minimum_detector_interval = 15;
+    schedule.overload_detector_interval = 60;
+    schedule.object_roi_reuse_frames = 8;
+
     return schedule;
 }
 
 bool should_run_compressed_validation(
     std::uint64_t frame_id,
     bool detector_ran_this_frame,
+    bool has_reference_objects,
     double previous_ai_stability_loss,
     double confidence_loss_threshold,
     const RuntimeSchedule& schedule
 ) {
-    if (!detector_ran_this_frame) {
+    if (!detector_ran_this_frame || !has_reference_objects) {
         return false;
     }
 

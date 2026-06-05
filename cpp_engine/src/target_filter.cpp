@@ -64,17 +64,17 @@ TargetFilterPolicy target_filter_roi_policy() {
     TargetFilterPolicy policy;
 
     policy.rules = {
-        {"person", 0.15},
-        {"bicycle", 0.15},
-        {"car", 0.15},
-        {"motorcycle", 0.15},
-        {"bus", 0.15},
-        {"truck", 0.15},
-        {"traffic light", 0.12},
-        {"stop sign", 0.12}
+        {"person", 0.08},
+        {"bicycle", 0.08},
+        {"car", 0.08},
+        {"motorcycle", 0.08},
+        {"bus", 0.08},
+        {"truck", 0.08},
+        {"traffic light", 0.08},
+        {"stop sign", 0.08}
     };
 
-    policy.fallback_min_confidence = 0.20;
+    policy.fallback_min_confidence = 0.12;
     policy.keep_unknown_classes = false;
 
     return policy;
@@ -84,17 +84,17 @@ TargetFilterPolicy target_filter_event_policy() {
     TargetFilterPolicy policy;
 
     policy.rules = {
-        {"person", 0.22},
-        {"bicycle", 0.22},
-        {"car", 0.22},
-        {"motorcycle", 0.22},
-        {"bus", 0.22},
-        {"truck", 0.22},
-        {"traffic light", 0.18},
-        {"stop sign", 0.18}
+        {"person", 0.10},
+        {"bicycle", 0.10},
+        {"car", 0.10},
+        {"motorcycle", 0.10},
+        {"bus", 0.10},
+        {"truck", 0.10},
+        {"traffic light", 0.10},
+        {"stop sign", 0.10}
     };
 
-    policy.fallback_min_confidence = 0.30;
+    policy.fallback_min_confidence = 0.15;
     policy.keep_unknown_classes = false;
 
     return policy;

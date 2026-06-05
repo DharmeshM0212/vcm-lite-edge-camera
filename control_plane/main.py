@@ -93,9 +93,13 @@ def health() -> dict[str, Any]:
         "output_dir_exists": output_dir.exists(),
         "detection_event_exists": (output_dir / "latest_detection_event.json").exists(),
         "detection_history_exists": (output_dir / "detection_history.jsonl").exists(),
+        "validation_exists": (output_dir / "latest_validation.json").exists(),
+        "validation_history_exists": (output_dir / "validation_history.jsonl").exists(),
         "detection_frame_exists": (output_dir / "latest_detection_frame.jpg").exists(),
         "detection_crop_exists": (output_dir / "latest_detection_crop.jpg").exists(),
         "detection_reconstructed_exists": (output_dir / "latest_detection_reconstructed.jpg").exists(),
+        "validation_frame_exists": (output_dir / "latest_validation_frame.jpg").exists(),
+        "validation_reconstructed_exists": (output_dir / "latest_validation_reconstructed.jpg").exists(),
         "semantic_packet_exists": (output_dir / "latest_semantic_packet.json").exists(),
         "metrics_log_path": str(metrics_path),
         "metadata_log_path": str(metadata_path),
@@ -150,6 +154,19 @@ def recent_detection_events(limit: int = 20) -> list[dict[str, Any]]:
     return read_recent_jsonl_file(output_dir / "detection_history.jsonl", safe_limit)
 
 
+@app.get("/validation/latest")
+def latest_validation() -> dict[str, Any]:
+    output_dir = Path(state["output_dir"])
+    return read_json_file(output_dir / "latest_validation.json")
+
+
+@app.get("/validations/recent")
+def recent_validations(limit: int = 20) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 100))
+    output_dir = Path(state["output_dir"])
+    return read_recent_jsonl_file(output_dir / "validation_history.jsonl", safe_limit)
+
+
 @app.get("/metrics/recent")
 def recent_metrics(limit: int = 50) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 500))
@@ -187,6 +204,18 @@ def detection_reconstructed() -> FileResponse:
     return FileResponse(path)
 
 
+@app.get("/image/validation-frame")
+def validation_frame() -> FileResponse:
+    path = Path(state["output_dir"]) / "latest_validation_frame.jpg"
+    return FileResponse(path)
+
+
+@app.get("/image/validation-reconstructed")
+def validation_reconstructed() -> FileResponse:
+    path = Path(state["output_dir"]) / "latest_validation_reconstructed.jpg"
+    return FileResponse(path)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     metrics = read_last_json_line(state["metrics_log_path"])
@@ -202,12 +231,16 @@ def dashboard() -> HTMLResponse:
 
     output_dir = Path(state["output_dir"])
     event = read_json_file(output_dir / "latest_detection_event.json")
+    validation = read_json_file(output_dir / "latest_validation.json")
     detection_events = read_recent_jsonl_file(output_dir / "detection_history.jsonl", 20)
+    validation_events = read_recent_jsonl_file(output_dir / "validation_history.jsonl", 20)
 
     image_status = {
         "detection_frame": (output_dir / "latest_detection_frame.jpg").exists(),
         "detection_crop": (output_dir / "latest_detection_crop.jpg").exists(),
-        "detection_reconstructed": (output_dir / "latest_detection_reconstructed.jpg").exists()
+        "detection_reconstructed": (output_dir / "latest_detection_reconstructed.jpg").exists(),
+        "validation_frame": (output_dir / "latest_validation_frame.jpg").exists(),
+        "validation_reconstructed": (output_dir / "latest_validation_reconstructed.jpg").exists()
     }
 
     return HTMLResponse(
@@ -217,7 +250,9 @@ def dashboard() -> HTMLResponse:
             summary_data,
             image_status,
             event,
+            validation,
             webrtc_data,
-            detection_events
+            detection_events,
+            validation_events
         )
     )

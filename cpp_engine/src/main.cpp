@@ -22,14 +22,191 @@
 #include "semantic_packet.hpp"
 #include "runtime_schedule.hpp"
 #include "target_filter.hpp"
+#include "opencv_bridge.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <optional>
+#include <opencv2/opencv.hpp>
+#include <sstream>
 #include <string>
 #include <thread>
+
+namespace fs = std::filesystem;
+
+static double elapsed_ms(
+    const std::chrono::steady_clock::time_point& start,
+    const std::chrono::steady_clock::time_point& end
+) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+static std::string json_escape_local(const std::string& text) {
+    std::ostringstream output;
+
+    for (char c : text) {
+        switch (c) {
+            case '"':
+                output << "\\\"";
+                break;
+            case '\\':
+                output << "\\\\";
+                break;
+            case '\n':
+                output << "\\n";
+                break;
+            case '\r':
+                output << "\\r";
+                break;
+            case '\t':
+                output << "\\t";
+                break;
+            default:
+                output << c;
+                break;
+        }
+    }
+
+    return output.str();
+}
+
+static void write_text_file_local(const fs::path& path, const std::string& text) {
+    std::ofstream file(path, std::ios::out | std::ios::trunc);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    file << text;
+}
+
+static void append_jsonl_local(const fs::path& path, const std::string& text) {
+    std::ofstream file(path, std::ios::out | std::ios::app);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    file << text << "\n";
+}
+
+static IspSettings apply_realtime_isp_guard(
+    IspSettings settings,
+    const RateControllerOutput& controller_output,
+    double previous_ai_stability_loss,
+    double confidence_loss_threshold
+) {
+    std::string state = controller_output.controller_state;
+    std::string mode = controller_output.controller_mode;
+
+    bool realtime_pressure =
+        state.find("overload") != std::string::npos ||
+        mode.find("realtime") != std::string::npos;
+
+    bool ai_pressure = previous_ai_stability_loss > 0.60 * confidence_loss_threshold;
+
+    if (!realtime_pressure && !ai_pressure) {
+        return settings;
+    }
+
+    if (realtime_pressure) {
+        settings.clahe_enabled = false;
+        settings.denoise_strength = std::min(settings.denoise_strength, 0.0);
+        settings.sharpen_amount = std::min(settings.sharpen_amount, 0.20);
+
+        if (settings.profile.find("_rt") == std::string::npos) {
+            settings.profile += "_rt";
+        }
+    }
+
+    if (ai_pressure) {
+        settings.sharpen_amount = std::max(settings.sharpen_amount, 0.25);
+        settings.contrast_alpha = std::max(settings.contrast_alpha, 1.05);
+        settings.clahe_enabled = false;
+
+        if (settings.profile.find("_ai_protect") == std::string::npos) {
+            settings.profile += "_ai_protect";
+        }
+    }
+
+    return settings;
+}
+
+static std::string validation_json(
+    std::uint64_t frame_id,
+    const std::string& validation_type,
+    double reference_ai_confidence,
+    double compressed_ai_confidence,
+    double detector_confidence_loss,
+    double ai_stability_loss,
+    bool compressed_validation_ran,
+    bool detector_ran
+) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3);
+
+    ss << "{";
+    ss << "\"frame_id\":" << frame_id << ",";
+    ss << "\"validation_type\":\"" << json_escape_local(validation_type) << "\",";
+    ss << "\"reference_ai_confidence\":" << reference_ai_confidence << ",";
+    ss << "\"compressed_ai_confidence\":" << compressed_ai_confidence << ",";
+    ss << "\"detector_confidence_loss\":" << detector_confidence_loss << ",";
+    ss << "\"ai_stability_loss\":" << ai_stability_loss << ",";
+    ss << "\"compressed_validation_ran\":" << (compressed_validation_ran ? "true" : "false") << ",";
+    ss << "\"detector_ran\":" << (detector_ran ? "true" : "false");
+    ss << "}";
+
+    return ss.str();
+}
+
+static bool write_validation_snapshot(
+    const Frame& tuned_frame,
+    const Frame& reconstructed_frame,
+    std::uint64_t frame_id,
+    const std::string& validation_type,
+    double reference_ai_confidence,
+    double compressed_ai_confidence,
+    double detector_confidence_loss,
+    double ai_stability_loss,
+    bool compressed_validation_ran,
+    bool detector_ran,
+    const std::string& output_dir
+) {
+    fs::path output_path(output_dir);
+    fs::create_directories(output_path);
+
+    cv::Mat tuned_image = frame_to_mat(tuned_frame);
+    cv::Mat reconstructed_image = frame_to_mat(reconstructed_frame);
+
+    if (tuned_image.empty() || reconstructed_image.empty()) {
+        return false;
+    }
+
+    cv::imwrite((output_path / "latest_validation_frame.jpg").string(), tuned_image);
+    cv::imwrite((output_path / "latest_validation_reconstructed.jpg").string(), reconstructed_image);
+
+    std::string json = validation_json(
+        frame_id,
+        validation_type,
+        reference_ai_confidence,
+        compressed_ai_confidence,
+        detector_confidence_loss,
+        ai_stability_loss,
+        compressed_validation_ran,
+        detector_ran
+    );
+
+    write_text_file_local(output_path / "latest_validation.json", json);
+    append_jsonl_local(output_path / "validation_history.jsonl", json);
+
+    return true;
+}
 
 int main(int argc, char** argv) {
     std::string video_path = "../assets/videos/input.mp4";
@@ -124,10 +301,11 @@ int main(int argc, char** argv) {
         double previous_ai_stability_loss = 0.0;
 
         RuntimeSchedule runtime_schedule = default_runtime_schedule();
+
+        double cached_reference_ai_confidence = 0.0;
         double cached_compressed_ai_confidence = 0.0;
         double cached_detector_confidence_loss = 0.0;
         double cached_ai_stability_loss = 0.0;
-        bool compressed_validation_ran_this_frame = false;
 
         ProcessMonitor process_monitor;
 
@@ -154,7 +332,6 @@ int main(int argc, char** argv) {
 
         std::uint64_t last_detector_frame_id = 0;
         bool has_detector_frame = false;
-        bool detector_ran_this_frame = false;
 
         RateControllerOutput controller_output;
         controller_output.roi_quality = 85;
@@ -184,14 +361,34 @@ int main(int argc, char** argv) {
                 }
 
                 auto frame_start = std::chrono::steady_clock::now();
-                double latency_ms = std::chrono::duration<double, std::milli>(frame_start - maybe_frame->created_at).count();
+                double queue_wait_ms = elapsed_ms(maybe_frame->created_at, frame_start);
 
+                double isp_ms = 0.0;
+                double motion_roi_ms = 0.0;
+                double detector_ms = 0.0;
+                double semantic_encode_ms = 0.0;
+                double semantic_reconstruct_ms = 0.0;
+                double compressed_validation_ms = 0.0;
+                double event_write_ms = 0.0;
+
+                auto isp_start = std::chrono::steady_clock::now();
                 ImageStats input_stats = compute_image_stats(*maybe_frame);
                 IspSettings isp_settings = choose_isp_settings(input_stats);
+                isp_settings = apply_realtime_isp_guard(
+                    isp_settings,
+                    controller_output,
+                    previous_ai_stability_loss,
+                    config.confidence_loss_threshold
+                );
                 Frame tuned_frame = apply_isp_tuning(*maybe_frame, isp_settings);
                 ImageStats output_stats = compute_image_stats(tuned_frame);
+                auto isp_end = std::chrono::steady_clock::now();
+                isp_ms = elapsed_ms(isp_start, isp_end);
 
+                auto motion_start = std::chrono::steady_clock::now();
                 RoiResult motion_roi_result = motion_detector.detect(tuned_frame);
+                auto motion_end = std::chrono::steady_clock::now();
+                motion_roi_ms = elapsed_ms(motion_start, motion_end);
 
                 int effective_detector_interval = std::max(
                     controller_output.detector_interval,
@@ -215,12 +412,12 @@ int main(int argc, char** argv) {
                 bool force_detector_on_ai_loss =
                     previous_ai_stability_loss > 0.75 * config.confidence_loss_threshold;
 
-                bool run_detector =
+                bool detector_ran_this_frame =
                     warmup_detector || scheduled_detector || force_detector_on_ai_loss;
 
-                detector_ran_this_frame = run_detector;
+                if (detector_ran_this_frame) {
+                    auto detector_start = std::chrono::steady_clock::now();
 
-                if (run_detector) {
                     DetectorResult raw_reference_detector_result =
                         ai_detector.detect(tuned_frame, motion_roi_result);
 
@@ -234,8 +431,12 @@ int main(int argc, char** argv) {
                         event_filter_policy
                     );
 
+                    cached_reference_ai_confidence = last_reference_detector_result.mean_confidence;
                     last_detector_frame_id = maybe_frame->id;
                     has_detector_frame = true;
+
+                    auto detector_end = std::chrono::steady_clock::now();
+                    detector_ms = elapsed_ms(detector_start, detector_end);
                 }
 
                 std::uint64_t detector_age =
@@ -243,7 +444,7 @@ int main(int argc, char** argv) {
 
                 bool object_roi_fresh =
                     has_detector_frame &&
-                    detector_age <= 5 &&
+                    detector_age <= static_cast<std::uint64_t>(runtime_schedule.object_roi_reuse_frames) &&
                     !last_reference_detector_result.objects.empty();
 
                 DetectorResult roi_source_detector_result = last_reference_detector_result;
@@ -265,7 +466,7 @@ int main(int argc, char** argv) {
                 double current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
 
                 RateControllerInput controller_input;
-                controller_input.latency_ms = latency_ms;
+                controller_input.latency_ms = queue_wait_ms;
                 controller_input.roi_area_ratio = current_roi_area_ratio;
                 controller_input.estimated_fps = measured_fps > 0.0 ? measured_fps : source_fps;
                 controller_input.previous_bitrate_kbps = previous_bitrate_kbps;
@@ -279,6 +480,8 @@ int main(int argc, char** argv) {
                 int final_roi_quality = initial_roi_quality;
                 bool reencoded = false;
                 std::uint32_t reencode_attempts = 0;
+
+                auto semantic_encode_start = std::chrono::steady_clock::now();
 
                 SemanticEncodeResult encode_result = estimate_semantic_encode(
                     tuned_frame,
@@ -300,42 +503,83 @@ int main(int argc, char** argv) {
                 EncodedImage context_jpeg = encode_jpeg(context_frame, encode_result.context_quality);
                 EncodedImage roi_tile_jpeg = encode_jpeg(roi_tile.tile, encode_result.roi_quality);
 
-                Frame decoded_context = decode_jpeg(context_jpeg, tuned_frame.id);
-                Frame decoded_roi_tile = decode_jpeg(roi_tile_jpeg, tuned_frame.id);
+                auto semantic_encode_end = std::chrono::steady_clock::now();
+                semantic_encode_ms = elapsed_ms(semantic_encode_start, semantic_encode_end);
 
-                PackedRoiTile decoded_packed_tile;
-                decoded_packed_tile.tile = decoded_roi_tile;
-                decoded_packed_tile.tile_cols = roi_tile.tile_cols;
-                decoded_packed_tile.tile_rows = roi_tile.tile_rows;
-                decoded_packed_tile.cell_width = roi_tile.cell_width;
-                decoded_packed_tile.cell_height = roi_tile.cell_height;
+                std::size_t total_encoded_bytes = context_jpeg.bytes.size() + roi_tile_jpeg.bytes.size();
 
-                Frame reconstructed_frame = reconstruct_semantic_frame(
-                    decoded_context,
-                    decoded_packed_tile,
-                    roi_result,
-                    tuned_frame.width,
-                    tuned_frame.height
+                double actual_bitrate_kbps = estimate_frame_bitrate_kbps(
+                    total_encoded_bytes,
+                    measured_fps > 0.0 ? measured_fps : source_fps
                 );
 
-                Frame final_decoded_roi_tile = decoded_roi_tile;
-                Frame final_reconstructed_frame = reconstructed_frame;
-
-                double reference_ai_confidence = last_reference_detector_result.mean_confidence;
-                double compressed_ai_confidence = cached_compressed_ai_confidence;
-                double current_detector_confidence_loss = cached_detector_confidence_loss;
-
-                compressed_validation_ran_this_frame = should_run_compressed_validation(
+                bool compressed_validation_ran_this_frame = should_run_compressed_validation(
                     maybe_frame->id,
                     detector_ran_this_frame,
+                    !last_reference_detector_result.objects.empty(),
                     previous_ai_stability_loss,
                     config.confidence_loss_threshold,
                     runtime_schedule
                 );
 
-                if (compressed_validation_ran_this_frame) {
+                bool semantic_packet_write_this_frame = should_write_semantic_packet(
+                    maybe_frame->id,
+                    detector_ran_this_frame,
+                    cached_ai_stability_loss,
+                    config.confidence_loss_threshold,
+                    runtime_schedule
+                );
+
+                bool detection_event_write_this_frame = should_write_detection_event(
+                    maybe_frame->id,
+                    detector_ran_this_frame,
+                    !last_event_detector_result.objects.empty(),
+                    runtime_schedule
+                );
+
+                bool need_reconstruction =
+                    compressed_validation_ran_this_frame ||
+                    detection_event_write_this_frame ||
+                    semantic_packet_write_this_frame;
+
+                std::optional<Frame> final_reconstructed_frame;
+
+                if (need_reconstruction) {
+                    auto reconstruct_start = std::chrono::steady_clock::now();
+
+                    Frame decoded_context = decode_jpeg(context_jpeg, tuned_frame.id);
+                    Frame decoded_roi_tile = decode_jpeg(roi_tile_jpeg, tuned_frame.id);
+
+                    PackedRoiTile decoded_packed_tile;
+                    decoded_packed_tile.tile = decoded_roi_tile;
+                    decoded_packed_tile.tile_cols = roi_tile.tile_cols;
+                    decoded_packed_tile.tile_rows = roi_tile.tile_rows;
+                    decoded_packed_tile.cell_width = roi_tile.cell_width;
+                    decoded_packed_tile.cell_height = roi_tile.cell_height;
+
+                    final_reconstructed_frame = reconstruct_semantic_frame(
+                        decoded_context,
+                        decoded_packed_tile,
+                        roi_result,
+                        tuned_frame.width,
+                        tuned_frame.height
+                    );
+
+                    auto reconstruct_end = std::chrono::steady_clock::now();
+                    semantic_reconstruct_ms = elapsed_ms(reconstruct_start, reconstruct_end);
+                }
+
+                StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
+
+                double reference_ai_confidence = cached_reference_ai_confidence;
+                double compressed_ai_confidence = cached_compressed_ai_confidence;
+                double current_detector_confidence_loss = cached_detector_confidence_loss;
+
+                if (compressed_validation_ran_this_frame && final_reconstructed_frame.has_value()) {
+                    auto validation_start = std::chrono::steady_clock::now();
+
                     DetectorResult raw_compressed_detector_result =
-                        ai_detector.detect(final_reconstructed_frame, roi_result);
+                        ai_detector.detect(*final_reconstructed_frame, roi_result);
 
                     last_compressed_detector_result = filter_task_relevant_objects(
                         raw_compressed_detector_result,
@@ -348,59 +592,52 @@ int main(int argc, char** argv) {
                         compressed_ai_confidence
                     );
 
-                    cached_compressed_ai_confidence = compressed_ai_confidence;
-                    cached_detector_confidence_loss = current_detector_confidence_loss;
-                }
-
-                StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
-
-                if (compressed_validation_ran_this_frame &&
-                    (last_reference_detector_result.used_dnn || last_compressed_detector_result.used_dnn)) {
                     stability.total_loss = std::clamp(
                         0.35 * stability.total_loss + 0.65 * current_detector_confidence_loss,
                         0.0,
                         1.0
                     );
-                    cached_ai_stability_loss = stability.total_loss;
-                } else if (!compressed_validation_ran_this_frame) {
-                    stability.total_loss = std::clamp(
-                        0.50 * stability.total_loss + 0.50 * cached_ai_stability_loss,
-                        0.0,
-                        1.0
-                    );
-
-                    compressed_ai_confidence = cached_compressed_ai_confidence;
-                    current_detector_confidence_loss = cached_detector_confidence_loss;
-                } else {
-                    stability.total_loss = std::clamp(stability.total_loss, 0.0, 1.0);
-                    compressed_ai_confidence = std::clamp(
-                        reference_ai_confidence * (1.0 - stability.total_loss),
-                        0.0,
-                        1.0
-                    );
-                    current_detector_confidence_loss = detector_confidence_loss(
-                        reference_ai_confidence,
-                        compressed_ai_confidence
-                    );
 
                     cached_compressed_ai_confidence = compressed_ai_confidence;
                     cached_detector_confidence_loss = current_detector_confidence_loss;
                     cached_ai_stability_loss = stability.total_loss;
+
+                    auto validation_end = std::chrono::steady_clock::now();
+                    compressed_validation_ms = elapsed_ms(validation_start, validation_end);
+                } else {
+                    stability.total_loss = cached_ai_stability_loss;
+
+                    if (stability.total_loss <= 0.0) {
+                        stability.total_loss = std::clamp(
+                            compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg).total_loss,
+                            0.0,
+                            1.0
+                        );
+                    }
+
+                    reference_ai_confidence = cached_reference_ai_confidence;
+                    compressed_ai_confidence = cached_compressed_ai_confidence;
+                    current_detector_confidence_loss = cached_detector_confidence_loss;
                 }
 
                 double initial_stability_loss = stability.total_loss;
 
                 auto after_first_encode = std::chrono::steady_clock::now();
-                double elapsed_ms = std::chrono::duration<double, std::milli>(after_first_encode - frame_start).count();
-                double remaining_budget_ms = config.latency_budget_ms - elapsed_ms;
+                double elapsed_before_reencode_ms = elapsed_ms(frame_start, after_first_encode);
+                double remaining_budget_ms = config.latency_budget_ms - elapsed_before_reencode_ms;
                 bool stability_high = stability.total_loss > config.confidence_loss_threshold;
                 bool budget_allows_reencode = remaining_budget_ms > 8.0;
 
-                if (stability_high && controller_output.reencode_allowed && budget_allows_reencode) {
+                if (compressed_validation_ran_this_frame &&
+                    stability_high &&
+                    controller_output.reencode_allowed &&
+                    budget_allows_reencode &&
+                    final_reconstructed_frame.has_value()) {
                     int repaired_quality = std::min(config.roi_quality_max, encode_result.roi_quality + 8);
 
                     EncodedImage repaired_roi_tile_jpeg = encode_jpeg(roi_tile.tile, repaired_quality);
                     Frame repaired_decoded_roi_tile = decode_jpeg(repaired_roi_tile_jpeg, tuned_frame.id);
+                    Frame decoded_context = decode_jpeg(context_jpeg, tuned_frame.id);
 
                     PackedRoiTile repaired_packed_tile;
                     repaired_packed_tile.tile = repaired_decoded_roi_tile;
@@ -417,58 +654,38 @@ int main(int argc, char** argv) {
                         tuned_frame.height
                     );
 
-                    final_decoded_roi_tile = repaired_decoded_roi_tile;
-                    final_reconstructed_frame = repaired_reconstructed_frame;
+                    DetectorResult raw_repaired_detector_result = ai_detector.detect(
+                        repaired_reconstructed_frame,
+                        roi_result
+                    );
 
-                    DetectorResult repaired_compressed_detector_result = last_compressed_detector_result;
-                    double repaired_compressed_confidence = compressed_ai_confidence;
-                    double repaired_detector_loss = current_detector_confidence_loss;
-
-                    if (compressed_validation_ran_this_frame) {
-                        DetectorResult raw_repaired_detector_result = ai_detector.detect(
-                            repaired_reconstructed_frame,
-                            roi_result
-                        );
-
-                        repaired_compressed_detector_result = filter_task_relevant_objects(
-                            raw_repaired_detector_result,
-                            roi_filter_policy
-                        );
-
-                        repaired_compressed_confidence = repaired_compressed_detector_result.mean_confidence;
-                        repaired_detector_loss = detector_confidence_loss(
-                            reference_ai_confidence,
-                            repaired_compressed_confidence
-                        );
-                    }
+                    DetectorResult repaired_compressed_detector_result = filter_task_relevant_objects(
+                        raw_repaired_detector_result,
+                        roi_filter_policy
+                    );
 
                     StabilityResult repaired_stability = compute_roi_stability_loss(
                         roi_tile.tile,
                         repaired_roi_tile_jpeg
                     );
 
-                    if (compressed_validation_ran_this_frame &&
-                        (last_reference_detector_result.used_dnn || repaired_compressed_detector_result.used_dnn)) {
-                        repaired_stability.total_loss = std::clamp(
-                            0.35 * repaired_stability.total_loss + 0.65 * repaired_detector_loss,
-                            0.0,
-                            1.0
-                        );
-                    } else {
-                        repaired_stability.total_loss = std::clamp(repaired_stability.total_loss, 0.0, 1.0);
-                        repaired_compressed_confidence = std::clamp(
-                            reference_ai_confidence * (1.0 - repaired_stability.total_loss),
-                            0.0,
-                            1.0
-                        );
-                        repaired_detector_loss = detector_confidence_loss(
-                            reference_ai_confidence,
-                            repaired_compressed_confidence
-                        );
-                    }
+                    double repaired_compressed_confidence =
+                        repaired_compressed_detector_result.mean_confidence;
+
+                    double repaired_detector_loss = detector_confidence_loss(
+                        reference_ai_confidence,
+                        repaired_compressed_confidence
+                    );
+
+                    repaired_stability.total_loss = std::clamp(
+                        0.35 * repaired_stability.total_loss + 0.65 * repaired_detector_loss,
+                        0.0,
+                        1.0
+                    );
 
                     if (repaired_stability.total_loss <= stability.total_loss) {
                         roi_tile_jpeg = std::move(repaired_roi_tile_jpeg);
+                        total_encoded_bytes = context_jpeg.bytes.size() + roi_tile_jpeg.bytes.size();
                         stability = repaired_stability;
                         last_compressed_detector_result = repaired_compressed_detector_result;
                         compressed_ai_confidence = repaired_compressed_confidence;
@@ -476,6 +693,7 @@ int main(int argc, char** argv) {
                         final_roi_quality = repaired_quality;
                         reencoded = true;
                         reencode_attempts = 1;
+                        final_reconstructed_frame = repaired_reconstructed_frame;
 
                         cached_compressed_ai_confidence = compressed_ai_confidence;
                         cached_detector_confidence_loss = current_detector_confidence_loss;
@@ -483,16 +701,9 @@ int main(int argc, char** argv) {
                     }
                 }
 
-                std::size_t total_encoded_bytes = context_jpeg.bytes.size() + roi_tile_jpeg.bytes.size();
-
-                double actual_bitrate_kbps = estimate_frame_bitrate_kbps(
-                    total_encoded_bytes,
-                    measured_fps > 0.0 ? measured_fps : source_fps
-                );
-
                 SemanticPacketInput semantic_packet_input;
                 semantic_packet_input.frame_id = maybe_frame->id;
-                semantic_packet_input.timestamp_ms = latency_ms;
+                semantic_packet_input.timestamp_ms = queue_wait_ms;
                 semantic_packet_input.frame_width = static_cast<std::uint32_t>(tuned_frame.width);
                 semantic_packet_input.frame_height = static_cast<std::uint32_t>(tuned_frame.height);
                 semantic_packet_input.context_width = static_cast<std::uint32_t>(context_frame.width);
@@ -512,25 +723,36 @@ int main(int argc, char** argv) {
                 semantic_packet_input.context_jpeg = context_jpeg;
                 semantic_packet_input.roi_tile_jpeg = roi_tile_jpeg;
 
-                if (should_write_semantic_packet(
-                        maybe_frame->id,
-                        detector_ran_this_frame,
-                        stability.total_loss,
-                        config.confidence_loss_threshold,
-                        runtime_schedule
-                    )) {
+                if (semantic_packet_write_this_frame) {
                     write_semantic_packet(semantic_packet_input, output_dir);
+                }
+
+                if ((semantic_packet_write_this_frame || compressed_validation_ran_this_frame) &&
+                    final_reconstructed_frame.has_value()) {
+                    std::string validation_type =
+                        compressed_validation_ran_this_frame ? "ai_validation" : "semantic_snapshot";
+
+                    write_validation_snapshot(
+                        tuned_frame,
+                        *final_reconstructed_frame,
+                        maybe_frame->id,
+                        validation_type,
+                        reference_ai_confidence,
+                        compressed_ai_confidence,
+                        current_detector_confidence_loss,
+                        stability.total_loss,
+                        compressed_validation_ran_this_frame,
+                        detector_ran_this_frame,
+                        output_dir
+                    );
                 }
 
                 previous_bitrate_kbps = actual_bitrate_kbps;
                 previous_ai_stability_loss = stability.total_loss;
 
-                auto frame_done = std::chrono::steady_clock::now();
-                latency_ms = std::chrono::duration<double, std::milli>(frame_done - maybe_frame->created_at).count();
-
                 MetadataPacketInput metadata_input;
                 metadata_input.frame_id = maybe_frame->id;
-                metadata_input.latency_ms = latency_ms;
+                metadata_input.latency_ms = queue_wait_ms;
                 metadata_input.bitrate_kbps = actual_bitrate_kbps;
                 metadata_input.ai_stability_loss = stability.total_loss;
                 metadata_input.context_width = context_frame.width;
@@ -549,11 +771,45 @@ int main(int argc, char** argv) {
 
                 std::string metadata_json = metadata_to_json(metadata_input);
 
+                if (detection_event_write_this_frame && final_reconstructed_frame.has_value()) {
+                    auto event_start = std::chrono::steady_clock::now();
+
+                    write_detection_event_snapshot(
+                        tuned_frame,
+                        *final_reconstructed_frame,
+                        last_event_detector_result,
+                        maybe_frame->id,
+                        reference_ai_confidence,
+                        compressed_ai_confidence,
+                        current_detector_confidence_loss,
+                        stability.total_loss,
+                        output_dir
+                    );
+
+                    auto event_end = std::chrono::steady_clock::now();
+                    event_write_ms = elapsed_ms(event_start, event_end);
+                }
+
+                auto frame_done = std::chrono::steady_clock::now();
+                double processing_ms = elapsed_ms(frame_start, frame_done);
+                double latency_ms = elapsed_ms(maybe_frame->created_at, frame_done);
+
                 EngineMetrics metrics;
                 metrics.frame_id = maybe_frame->id;
                 metrics.fps = measured_fps;
                 metrics.latency_ms = latency_ms;
                 metrics.bitrate_kbps = actual_bitrate_kbps;
+
+                metrics.queue_wait_ms = queue_wait_ms;
+                metrics.processing_ms = processing_ms;
+                metrics.isp_ms = isp_ms;
+                metrics.motion_roi_ms = motion_roi_ms;
+                metrics.detector_ms = detector_ms;
+                metrics.semantic_encode_ms = semantic_encode_ms;
+                metrics.semantic_reconstruct_ms = semantic_reconstruct_ms;
+                metrics.compressed_validation_ms = compressed_validation_ms;
+                metrics.event_write_ms = event_write_ms;
+
                 metrics.input_brightness = input_stats.mean_brightness;
                 metrics.input_contrast = input_stats.contrast;
                 metrics.input_sharpness = input_stats.sharpness;
@@ -610,25 +866,6 @@ int main(int argc, char** argv) {
                     metrics.mode = "dnn_detector";
                 } else {
                     metrics.mode = "motion_detector_fallback";
-                }
-
-                if (should_write_detection_event(
-                        maybe_frame->id,
-                        detector_ran_this_frame,
-                        !last_event_detector_result.objects.empty(),
-                        runtime_schedule
-                    )) {
-                    write_detection_event_snapshot(
-                        tuned_frame,
-                        final_reconstructed_frame,
-                        last_event_detector_result,
-                        maybe_frame->id,
-                        reference_ai_confidence,
-                        compressed_ai_confidence,
-                        current_detector_confidence_loss,
-                        stability.total_loss,
-                        output_dir
-                    );
                 }
 
                 std::string metrics_json = metrics_to_json(metrics);

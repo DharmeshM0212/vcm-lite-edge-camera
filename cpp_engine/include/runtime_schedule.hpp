@@ -9,6 +9,7 @@ struct RuntimeSchedule {
     int detection_event_interval;
     int minimum_detector_interval;
     int overload_detector_interval;
+    int object_roi_reuse_frames;
 };
 
 RuntimeSchedule default_runtime_schedule();
@@ -16,6 +17,7 @@ RuntimeSchedule default_runtime_schedule();
 bool should_run_compressed_validation(
     std::uint64_t frame_id,
     bool detector_ran_this_frame,
+    bool has_reference_objects,
     double previous_ai_stability_loss,
     double confidence_loss_threshold,
     const RuntimeSchedule& schedule

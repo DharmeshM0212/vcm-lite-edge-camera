@@ -43,6 +43,16 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"latency_ms\":" << metrics.latency_ms << ",";
     ss << "\"bitrate_kbps\":" << metrics.bitrate_kbps << ",";
 
+    ss << "\"queue_wait_ms\":" << metrics.queue_wait_ms << ",";
+    ss << "\"processing_ms\":" << metrics.processing_ms << ",";
+    ss << "\"isp_ms\":" << metrics.isp_ms << ",";
+    ss << "\"motion_roi_ms\":" << metrics.motion_roi_ms << ",";
+    ss << "\"detector_ms\":" << metrics.detector_ms << ",";
+    ss << "\"semantic_encode_ms\":" << metrics.semantic_encode_ms << ",";
+    ss << "\"semantic_reconstruct_ms\":" << metrics.semantic_reconstruct_ms << ",";
+    ss << "\"compressed_validation_ms\":" << metrics.compressed_validation_ms << ",";
+    ss << "\"event_write_ms\":" << metrics.event_write_ms << ",";
+
     ss << "\"input_brightness\":" << metrics.input_brightness << ",";
     ss << "\"input_contrast\":" << metrics.input_contrast << ",";
     ss << "\"input_sharpness\":" << metrics.input_sharpness << ",";
@@ -64,11 +74,13 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
 
     ss << "\"roi_count\":" << metrics.roi_count << ",";
     ss << "\"roi_area_ratio\":" << metrics.roi_area_ratio << ",";
+
     ss << "\"detected_object_count\":" << metrics.detected_object_count << ",";
     ss << "\"detector_ran\":" << (metrics.detector_ran ? "true" : "false") << ",";
     ss << "\"detector_used_dnn\":" << (metrics.detector_used_dnn ? "true" : "false") << ",";
     ss << "\"raw_detector_candidates\":" << metrics.raw_detector_candidates << ",";
     ss << "\"max_detector_confidence\":" << metrics.max_detector_confidence << ",";
+
     ss << "\"reference_ai_confidence\":" << metrics.reference_ai_confidence << ",";
     ss << "\"compressed_ai_confidence\":" << metrics.compressed_ai_confidence << ",";
     ss << "\"detector_confidence_loss\":" << metrics.detector_confidence_loss << ",";
@@ -95,6 +107,7 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"controller_mode\":\"" << json_escape(metrics.controller_mode) << "\",";
     ss << "\"controller_reason\":\"" << json_escape(metrics.controller_reason) << "\",";
     ss << "\"controller_action\":\"" << json_escape(metrics.controller_action) << "\",";
+
     ss << "\"ai_stability_loss\":" << metrics.ai_stability_loss << ",";
 
     ss << "\"cpu_percent\":" << metrics.cpu_percent << ",";
