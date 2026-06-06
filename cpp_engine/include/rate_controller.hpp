@@ -44,5 +44,6 @@ private:
     RateControllerOutput sparse_idle_output(const RateControllerInput& input) const;
     RateControllerOutput realtime_protect_output(const RateControllerInput& input) const;
     RateControllerOutput dense_roi_output(const RateControllerInput& input) const;
+    RateControllerOutput dense_extreme_output(const RateControllerInput& input) const;
     RateControllerOutput overload_output(const RateControllerInput& input) const;
 };

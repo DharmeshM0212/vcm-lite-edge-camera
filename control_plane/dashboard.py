@@ -13,16 +13,21 @@ def fmt(value: Any, digits: int = 2) -> str:
     return str(value)
 
 
+def pick_task_loss(data: dict[str, Any]) -> Any:
+    return data.get("task_preservation_loss", data.get("ai_stability_loss"))
+
+
+def pick_reconstructed_confidence(data: dict[str, Any]) -> Any:
+    return data.get("compressed_ai_confidence")
+
+
 def status_class(metrics: dict[str, Any]) -> str:
     state = str(metrics.get("controller_state", "")).lower()
-
-    if "ai_repair" in state:
-        return "warn"
 
     if "overload" in state:
         return "bad"
 
-    if "rate" in state or "protect" in state or "watch" in state:
+    if "repair" in state or "protect" in state or "watch" in state or "dense" in state:
         return "warn"
 
     return "ok"
@@ -60,8 +65,8 @@ def render_event_panel(event: dict[str, Any]) -> str:
     if not event:
         return """
         <div class="panel">
-            <h2>Last Object Detection Event</h2>
-            <p class="muted">No confirmed object event yet. The validation snapshots can still update even without a confirmed object.</p>
+            <h2>Last Object Event</h2>
+            <p class="muted">No confirmed object event yet. Task-validation snapshots can still update even without a confirmed object.</p>
         </div>
         """
 
@@ -70,7 +75,7 @@ def render_event_panel(event: dict[str, Any]) -> str:
 
     return f"""
     <div class="panel">
-        <h2>Last Object Detection Event</h2>
+        <h2>Last Object Event</h2>
         <div class="kv">
             <div class="key">Frame ID</div>
             <div class="value">{fmt(event.get("frame_id"), 0)}</div>
@@ -84,12 +89,16 @@ def render_event_panel(event: dict[str, Any]) -> str:
             <div class="value">{fmt(event.get("object_count"), 0)}</div>
             <div class="key">Reference confidence</div>
             <div class="value">{fmt(event.get("reference_ai_confidence"), 3)}</div>
-            <div class="key">Compressed confidence</div>
-            <div class="value">{fmt(event.get("compressed_ai_confidence"), 3)}</div>
-            <div class="key">Detector confidence loss</div>
+            <div class="key">Reconstructed confidence</div>
+            <div class="value">{fmt(pick_reconstructed_confidence(event), 3)}</div>
+            <div class="key">Detection confidence drop</div>
             <div class="value">{fmt(event.get("detector_confidence_loss"), 3)}</div>
-            <div class="key">AI stability loss</div>
-            <div class="value">{fmt(event.get("ai_stability_loss"), 3)}</div>
+            <div class="key">Task preservation loss</div>
+            <div class="value">{fmt(pick_task_loss(event), 3)}</div>
+            <div class="key">Semantic PSNR</div>
+            <div class="value">{fmt(event.get("semantic_psnr_db"), 2)} dB</div>
+            <div class="key">Semantic SSIM</div>
+            <div class="value">{fmt(event.get("semantic_ssim"), 3)}</div>
         </div>
     </div>
     """
@@ -99,14 +108,14 @@ def render_validation_panel(validation: dict[str, Any]) -> str:
     if not validation:
         return """
         <div class="panel">
-            <h2>Last Semantic Validation</h2>
+            <h2>Last Task Validation</h2>
             <p class="muted">No semantic validation snapshot has been written yet.</p>
         </div>
         """
 
     return f"""
     <div class="panel">
-        <h2>Last Semantic Validation</h2>
+        <h2>Last Task Validation</h2>
         <div class="kv">
             <div class="key">Frame ID</div>
             <div class="value">{fmt(validation.get("frame_id"), 0)}</div>
@@ -114,15 +123,19 @@ def render_validation_panel(validation: dict[str, Any]) -> str:
             <div class="value">{escape(str(validation.get("validation_type", "-")))}</div>
             <div class="key">Reference confidence</div>
             <div class="value">{fmt(validation.get("reference_ai_confidence"), 3)}</div>
-            <div class="key">Compressed confidence</div>
-            <div class="value">{fmt(validation.get("compressed_ai_confidence"), 3)}</div>
-            <div class="key">Detector confidence loss</div>
+            <div class="key">Reconstructed confidence</div>
+            <div class="value">{fmt(pick_reconstructed_confidence(validation), 3)}</div>
+            <div class="key">Detection confidence drop</div>
             <div class="value">{fmt(validation.get("detector_confidence_loss"), 3)}</div>
-            <div class="key">AI stability loss</div>
-            <div class="value">{fmt(validation.get("ai_stability_loss"), 3)}</div>
+            <div class="key">Task preservation loss</div>
+            <div class="value">{fmt(pick_task_loss(validation), 3)}</div>
+            <div class="key">Semantic PSNR</div>
+            <div class="value">{fmt(validation.get("semantic_psnr_db"), 2)} dB</div>
+            <div class="key">Semantic SSIM</div>
+            <div class="value">{fmt(validation.get("semantic_ssim"), 3)}</div>
             <div class="key">Detector ran</div>
             <div class="value">{escape(str(validation.get("detector_ran", "-")))}</div>
-            <div class="key">Compressed validation ran</div>
+            <div class="key">Full validation ran</div>
             <div class="value">{escape(str(validation.get("compressed_validation_ran", "-")))}</div>
         </div>
     </div>
@@ -149,7 +162,7 @@ def render_recent_events_panel(events: list[dict[str, Any]]) -> str:
                 <td>{escape(str(obj.get("label", "-")))}</td>
                 <td>{fmt(obj.get("confidence"), 3)}</td>
                 <td>{fmt(event.get("object_count"), 0)}</td>
-                <td>{fmt(event.get("ai_stability_loss"), 3)}</td>
+                <td>{fmt(pick_task_loss(event), 3)}</td>
                 <td>{fmt(event.get("detector_confidence_loss"), 3)}</td>
             </tr>
             """
@@ -165,8 +178,8 @@ def render_recent_events_panel(events: list[dict[str, Any]]) -> str:
                     <th>Object</th>
                     <th>Conf.</th>
                     <th>Count</th>
-                    <th>AI Loss</th>
-                    <th>Conf. Loss</th>
+                    <th>Task Loss</th>
+                    <th>Conf. Drop</th>
                 </tr>
             </thead>
             <tbody>{''.join(rows)}</tbody>
@@ -179,7 +192,7 @@ def render_recent_validations_panel(validations: list[dict[str, Any]]) -> str:
     if not validations:
         return """
         <div class="panel">
-            <h2>Recent Semantic Validations</h2>
+            <h2>Recent Task Validations</h2>
             <p class="muted">No validation history yet.</p>
         </div>
         """
@@ -193,23 +206,27 @@ def render_recent_validations_panel(validations: list[dict[str, Any]]) -> str:
                 <td>{fmt(event.get("frame_id"), 0)}</td>
                 <td>{escape(str(event.get("validation_type", "-")))}</td>
                 <td>{fmt(event.get("reference_ai_confidence"), 3)}</td>
-                <td>{fmt(event.get("compressed_ai_confidence"), 3)}</td>
-                <td>{fmt(event.get("ai_stability_loss"), 3)}</td>
+                <td>{fmt(pick_reconstructed_confidence(event), 3)}</td>
+                <td>{fmt(pick_task_loss(event), 3)}</td>
+                <td>{fmt(event.get("semantic_psnr_db"), 1)}</td>
+                <td>{fmt(event.get("semantic_ssim"), 3)}</td>
             </tr>
             """
         )
 
     return f"""
     <div class="panel">
-        <h2>Recent Semantic Validations</h2>
+        <h2>Recent Task Validations</h2>
         <table class="event-table">
             <thead>
                 <tr>
                     <th>Frame</th>
                     <th>Type</th>
                     <th>Ref.</th>
-                    <th>Comp.</th>
-                    <th>AI Loss</th>
+                    <th>Recon.</th>
+                    <th>Task Loss</th>
+                    <th>PSNR</th>
+                    <th>SSIM</th>
                 </tr>
             </thead>
             <tbody>{''.join(rows)}</tbody>
@@ -223,7 +240,7 @@ def render_webrtc_panel(webrtc: dict[str, Any]) -> str:
 
     return f"""
     <div class="panel">
-        <h2>WebRTC Ingest</h2>
+        <h2>WebRTC Live Ingest</h2>
         <div class="kv">
             <div class="key">Status</div>
             <div class="value">{status}</div>
@@ -243,7 +260,7 @@ def render_webrtc_panel(webrtc: dict[str, Any]) -> str:
 def render_controller_panel(metrics: dict[str, Any], summary: dict[str, Any]) -> str:
     return f"""
     <div class="panel">
-        <h2>Adaptive Controller</h2>
+        <h2>Adaptive Edge Controller</h2>
         <div class="kv">
             <div class="key">State</div>
             <div class="value">{escape(str(metrics.get("controller_state", "-")))}</div>
@@ -255,9 +272,9 @@ def render_controller_panel(metrics: dict[str, Any], summary: dict[str, Any]) ->
             <div class="value">{escape(str(metrics.get("controller_action", "-")))}</div>
             <div class="key">Detector interval</div>
             <div class="value">{fmt(metrics.get("detector_interval"), 0)}</div>
-            <div class="key">ROI quality</div>
+            <div class="key">Object ROI quality</div>
             <div class="value">{fmt(metrics.get("roi_quality"), 0)}</div>
-            <div class="key">Context quality</div>
+            <div class="key">Background quality</div>
             <div class="value">{fmt(metrics.get("context_quality"), 0)}</div>
             <div class="key">Context size</div>
             <div class="value">{fmt(metrics.get("context_width"), 0)} × {fmt(metrics.get("context_height"), 0)}</div>
@@ -285,9 +302,13 @@ def render_ai_panel(metrics: dict[str, Any], event: dict[str, Any], validation: 
 
     detector_status = "ran this frame" if bool(metrics.get("detector_ran", False)) else "scheduled / reused"
 
+    task_loss = pick_task_loss(validation) if validation else metrics.get("task_preservation_loss", metrics.get("ai_stability_loss"))
+    psnr = validation.get("semantic_psnr_db") if validation else metrics.get("semantic_psnr_db")
+    ssim = validation.get("semantic_ssim") if validation else metrics.get("semantic_ssim")
+
     return f"""
     <div class="panel">
-        <h2>AI / Detector</h2>
+        <h2>Task Detector</h2>
         <div class="kv">
             <div class="key">Detector status</div>
             <div class="value">{detector_status}</div>
@@ -309,12 +330,16 @@ def render_ai_panel(metrics: dict[str, Any], event: dict[str, Any], validation: 
             <div class="value">{fmt(metrics.get("max_detector_confidence"), 3)}</div>
             <div class="key">Last reference confidence</div>
             <div class="value">{fmt(validation.get("reference_ai_confidence") if validation else metrics.get("reference_ai_confidence"), 3)}</div>
-            <div class="key">Last compressed confidence</div>
-            <div class="value">{fmt(validation.get("compressed_ai_confidence") if validation else metrics.get("compressed_ai_confidence"), 3)}</div>
-            <div class="key">Last confidence loss</div>
+            <div class="key">Last reconstructed confidence</div>
+            <div class="value">{fmt(pick_reconstructed_confidence(validation) if validation else metrics.get("compressed_ai_confidence"), 3)}</div>
+            <div class="key">Last confidence drop</div>
             <div class="value">{fmt(validation.get("detector_confidence_loss") if validation else metrics.get("detector_confidence_loss"), 3)}</div>
-            <div class="key">AI stability loss</div>
-            <div class="value">{fmt(validation.get("ai_stability_loss") if validation else metrics.get("ai_stability_loss"), 3)}</div>
+            <div class="key">Task preservation loss</div>
+            <div class="value">{fmt(task_loss, 3)}</div>
+            <div class="key">Semantic PSNR</div>
+            <div class="value">{fmt(psnr, 2)} dB</div>
+            <div class="key">Semantic SSIM</div>
+            <div class="value">{fmt(ssim, 3)}</div>
             <div class="key">Mode</div>
             <div class="value">{escape(str(metrics.get("mode", "-")))}</div>
         </div>
@@ -352,13 +377,14 @@ def render_dashboard(
 
     recon_endpoint = "/image/detection-reconstructed" if image_status.get("detection_reconstructed", False) else "/image/validation-reconstructed"
     recon_exists = image_status.get("detection_reconstructed", False) or image_status.get("validation_reconstructed", False)
-    recon_title = "Semantic Reconstruction"
+    recon_title = "Reconstructed Semantic Frame"
 
     detection_frame_card = image_card(frame_title, frame_endpoint, frame_exists)
-    detection_crop_card = image_card("Detected Object Crop", "/image/detection-crop", image_status.get("detection_crop", False))
+    detection_crop_card = image_card("Object ROI Crop", "/image/detection-crop", image_status.get("detection_crop", False))
     detection_reconstructed_card = image_card(recon_title, recon_endpoint, recon_exists)
 
     page_version = str(int(time() * 1000))
+    task_loss = pick_task_loss(validation) if validation else metrics.get("task_preservation_loss", metrics.get("ai_stability_loss"))
 
     return f"""
 <!doctype html>
@@ -582,7 +608,7 @@ def render_dashboard(
 <body>
     <header>
         <h1>VCM-Lite Edge Camera</h1>
-        <p>Object-aware semantic video pipeline observability</p>
+        <p>Task-aware semantic video pipeline observability</p>
     </header>
     <main>
         <div class="topbar">
@@ -603,12 +629,12 @@ def render_dashboard(
                 <div class="metric-value">{fmt(metrics.get("latency_ms"), 1)}<span class="metric-unit">ms</span></div>
             </div>
             <div class="panel">
-                <div class="metric-label">Bitrate</div>
+                <div class="metric-label">Semantic Bitrate</div>
                 <div class="metric-value">{fmt(metrics.get("bitrate_kbps"), 1)}<span class="metric-unit">kbps</span></div>
             </div>
             <div class="panel">
-                <div class="metric-label">AI Stability Loss</div>
-                <div class="metric-value">{fmt(validation.get("ai_stability_loss") if validation else metrics.get("ai_stability_loss"), 3)}</div>
+                <div class="metric-label">Task Preservation Loss</div>
+                <div class="metric-value">{fmt(task_loss, 3)}</div>
             </div>
         </div>
 
@@ -634,17 +660,17 @@ def render_dashboard(
             <div class="panel">
                 <h2>Semantic Packet</h2>
                 <div class="kv">
-                    <div class="key">Context size</div>
+                    <div class="key">Background/context size</div>
                     <div class="value">{fmt(metrics.get("context_width"), 0)} × {fmt(metrics.get("context_height"), 0)}</div>
-                    <div class="key">ROI tile size</div>
+                    <div class="key">Object ROI tile size</div>
                     <div class="value">{fmt(metrics.get("roi_tile_width"), 0)} × {fmt(metrics.get("roi_tile_height"), 0)}</div>
                     <div class="key">ROI count</div>
                     <div class="value">{fmt(metrics.get("roi_count"), 0)}</div>
                     <div class="key">ROI area ratio</div>
                     <div class="value">{fmt(metrics.get("roi_area_ratio"), 3)}</div>
-                    <div class="key">ROI quality</div>
+                    <div class="key">Object ROI quality</div>
                     <div class="value">{fmt(metrics.get("roi_quality"), 0)}</div>
-                    <div class="key">Context quality</div>
+                    <div class="key">Background quality</div>
                     <div class="value">{fmt(metrics.get("context_quality"), 0)}</div>
                     <div class="key">Total encoded bytes</div>
                     <div class="value">{fmt(metrics.get("total_encoded_bytes"), 0)}</div>
@@ -681,7 +707,7 @@ def render_dashboard(
         </div>
 
         <footer>
-            VCM-Lite Edge Camera observability plane. Validation snapshots and object events are generated by the C++ engine.
+            VCM-Lite Edge Camera observability plane. Object events, semantic reconstruction snapshots, and task-validation metrics are generated by the C++ engine.
         </footer>
     </main>
 </body>

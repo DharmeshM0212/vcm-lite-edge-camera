@@ -52,6 +52,10 @@ struct EngineMetrics {
     double compressed_ai_confidence;
     double detector_confidence_loss;
 
+    double semantic_psnr_db;
+    double semantic_ssim;
+    double task_preservation_loss;
+
     std::uint32_t roi_quality;
     std::uint32_t context_quality;
     std::uint32_t context_width;

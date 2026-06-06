@@ -85,6 +85,10 @@ std::string metrics_to_json(const EngineMetrics& metrics) {
     ss << "\"compressed_ai_confidence\":" << metrics.compressed_ai_confidence << ",";
     ss << "\"detector_confidence_loss\":" << metrics.detector_confidence_loss << ",";
 
+    ss << "\"semantic_psnr_db\":" << metrics.semantic_psnr_db << ",";
+    ss << "\"semantic_ssim\":" << metrics.semantic_ssim << ",";
+    ss << "\"task_preservation_loss\":" << metrics.task_preservation_loss << ",";
+
     ss << "\"roi_quality\":" << metrics.roi_quality << ",";
     ss << "\"context_quality\":" << metrics.context_quality << ",";
     ss << "\"context_width\":" << metrics.context_width << ",";

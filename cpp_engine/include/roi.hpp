@@ -22,3 +22,4 @@ RoiBox clamp_roi_box(const RoiBox& box, int frame_width, int frame_height);
 double roi_iou(const RoiBox& a, const RoiBox& b);
 RoiResult merge_overlapping_rois(const RoiResult& input, double iou_threshold, int frame_width, int frame_height);
 RoiResult limit_rois(const RoiResult& input, int max_rois);
+RoiResult limit_rois_by_area_budget(const RoiResult& input, int max_rois, int frame_width, int frame_height, double max_area_ratio);

@@ -67,6 +67,17 @@ double roi_iou(const RoiBox& a, const RoiBox& b) {
     return intersection / union_area;
 }
 
+static double box_area(const RoiBox& box) {
+    return static_cast<double>(std::max(0, box.width) * std::max(0, box.height));
+}
+
+static double box_priority_score(const RoiBox& box) {
+    double area = box_area(box);
+    double area_score = std::sqrt(std::max(1.0, area));
+    double confidence_score = std::clamp(box.confidence, 0.0, 1.0);
+    return 0.78 * confidence_score + 0.22 * std::min(1.0, area_score / 220.0);
+}
+
 RoiResult merge_overlapping_rois(const RoiResult& input, double iou_threshold, int frame_width, int frame_height) {
     RoiResult result;
 
@@ -98,7 +109,7 @@ RoiResult merge_overlapping_rois(const RoiResult& input, double iou_threshold, i
     }
 
     std::sort(result.boxes.begin(), result.boxes.end(), [](const RoiBox& a, const RoiBox& b) {
-        return a.width * a.height > b.width * b.height;
+        return box_priority_score(a) > box_priority_score(b);
     });
 
     return result;
@@ -108,7 +119,7 @@ RoiResult limit_rois(const RoiResult& input, int max_rois) {
     RoiResult result = input;
 
     std::sort(result.boxes.begin(), result.boxes.end(), [](const RoiBox& a, const RoiBox& b) {
-        return a.confidence * static_cast<double>(a.width * a.height) > b.confidence * static_cast<double>(b.width * b.height);
+        return box_priority_score(a) > box_priority_score(b);
     });
 
     if (static_cast<int>(result.boxes.size()) > max_rois) {
@@ -116,4 +127,43 @@ RoiResult limit_rois(const RoiResult& input, int max_rois) {
     }
 
     return result;
+}
+
+RoiResult limit_rois_by_area_budget(const RoiResult& input, int max_rois, int frame_width, int frame_height, double max_area_ratio) {
+    RoiResult sorted = input;
+    RoiResult output;
+
+    std::sort(sorted.boxes.begin(), sorted.boxes.end(), [](const RoiBox& a, const RoiBox& b) {
+        return box_priority_score(a) > box_priority_score(b);
+    });
+
+    double frame_area = static_cast<double>(std::max(1, frame_width) * std::max(1, frame_height));
+    double area_budget = std::clamp(max_area_ratio, 0.02, 1.0) * frame_area;
+    double used_area = 0.0;
+
+    for (const auto& raw_box : sorted.boxes) {
+        if (static_cast<int>(output.boxes.size()) >= max_rois) {
+            break;
+        }
+
+        RoiBox box = clamp_roi_box(raw_box, frame_width, frame_height);
+        double area = box_area(box);
+
+        if (area <= 1.0) {
+            continue;
+        }
+
+        if (!output.boxes.empty() && used_area + area > area_budget) {
+            continue;
+        }
+
+        output.boxes.push_back(box);
+        used_area += area;
+    }
+
+    if (output.boxes.empty() && !sorted.boxes.empty() && max_rois > 0) {
+        output.boxes.push_back(clamp_roi_box(sorted.boxes.front(), frame_width, frame_height));
+    }
+
+    return output;
 }

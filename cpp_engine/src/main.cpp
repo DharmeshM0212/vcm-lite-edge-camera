@@ -25,6 +25,7 @@
 #include "opencv_bridge.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -45,6 +46,96 @@ static double elapsed_ms(
     const std::chrono::steady_clock::time_point& end
 ) {
     return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+static double compute_frame_psnr_db(const Frame& reference, const Frame& reconstructed) {
+    cv::Mat ref = frame_to_mat(reference);
+    cv::Mat rec = frame_to_mat(reconstructed);
+
+    if (ref.empty() || rec.empty()) {
+        return 0.0;
+    }
+
+    if (ref.size() != rec.size()) {
+        cv::resize(rec, rec, ref.size());
+    }
+
+    cv::Mat ref_float;
+    cv::Mat rec_float;
+    ref.convertTo(ref_float, CV_32F);
+    rec.convertTo(rec_float, CV_32F);
+
+    cv::Mat diff = ref_float - rec_float;
+    diff = diff.mul(diff);
+
+    cv::Scalar sum_value = cv::sum(diff);
+    double sse = sum_value[0] + sum_value[1] + sum_value[2];
+
+    double denom = static_cast<double>(ref.total() * ref.channels());
+
+    if (denom <= 0.0) {
+        return 0.0;
+    }
+
+    double mse = sse / denom;
+
+    if (mse <= 1e-9) {
+        return 99.0;
+    }
+
+    return 10.0 * std::log10((255.0 * 255.0) / mse);
+}
+
+static double compute_frame_ssim(const Frame& reference, const Frame& reconstructed) {
+    cv::Mat ref = frame_to_mat(reference);
+    cv::Mat rec = frame_to_mat(reconstructed);
+
+    if (ref.empty() || rec.empty()) {
+        return 0.0;
+    }
+
+    if (ref.size() != rec.size()) {
+        cv::resize(rec, rec, ref.size());
+    }
+
+    cv::Mat ref_gray;
+    cv::Mat rec_gray;
+
+    cv::cvtColor(ref, ref_gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(rec, rec_gray, cv::COLOR_BGR2GRAY);
+
+    ref_gray.convertTo(ref_gray, CV_32F);
+    rec_gray.convertTo(rec_gray, CV_32F);
+
+    cv::Scalar mean_ref;
+    cv::Scalar std_ref;
+    cv::Scalar mean_rec;
+    cv::Scalar std_rec;
+
+    cv::meanStdDev(ref_gray, mean_ref, std_ref);
+    cv::meanStdDev(rec_gray, mean_rec, std_rec);
+
+    cv::Mat ref_centered = ref_gray - mean_ref[0];
+    cv::Mat rec_centered = rec_gray - mean_rec[0];
+
+    double covariance = cv::mean(ref_centered.mul(rec_centered))[0];
+
+    double mu_x = mean_ref[0];
+    double mu_y = mean_rec[0];
+    double sigma_x2 = std_ref[0] * std_ref[0];
+    double sigma_y2 = std_rec[0] * std_rec[0];
+
+    double c1 = 6.5025;
+    double c2 = 58.5225;
+
+    double numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * covariance + c2);
+    double denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x2 + sigma_y2 + c2);
+
+    if (denominator <= 0.0) {
+        return 0.0;
+    }
+
+    return std::clamp(numerator / denominator, 0.0, 1.0);
 }
 
 static std::string json_escape_local(const std::string& text) {
@@ -144,7 +235,9 @@ static std::string validation_json(
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
-    double ai_stability_loss,
+    double task_preservation_loss,
+    double semantic_psnr_db,
+    double semantic_ssim,
     bool compressed_validation_ran,
     bool detector_ran
 ) {
@@ -157,7 +250,10 @@ static std::string validation_json(
     ss << "\"reference_ai_confidence\":" << reference_ai_confidence << ",";
     ss << "\"compressed_ai_confidence\":" << compressed_ai_confidence << ",";
     ss << "\"detector_confidence_loss\":" << detector_confidence_loss << ",";
-    ss << "\"ai_stability_loss\":" << ai_stability_loss << ",";
+    ss << "\"task_preservation_loss\":" << task_preservation_loss << ",";
+    ss << "\"ai_stability_loss\":" << task_preservation_loss << ",";
+    ss << "\"semantic_psnr_db\":" << semantic_psnr_db << ",";
+    ss << "\"semantic_ssim\":" << semantic_ssim << ",";
     ss << "\"compressed_validation_ran\":" << (compressed_validation_ran ? "true" : "false") << ",";
     ss << "\"detector_ran\":" << (detector_ran ? "true" : "false");
     ss << "}";
@@ -173,7 +269,9 @@ static bool write_validation_snapshot(
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
-    double ai_stability_loss,
+    double task_preservation_loss,
+    double semantic_psnr_db,
+    double semantic_ssim,
     bool compressed_validation_ran,
     bool detector_ran,
     const std::string& output_dir
@@ -192,14 +290,16 @@ static bool write_validation_snapshot(
     cv::imwrite((output_path / "latest_validation_reconstructed.jpg").string(), reconstructed_image);
 
     std::string json = validation_json(
-        frame_id,
-        validation_type,
-        reference_ai_confidence,
-        compressed_ai_confidence,
-        detector_confidence_loss,
-        ai_stability_loss,
-        compressed_validation_ran,
-        detector_ran
+    frame_id,
+    validation_type,
+    reference_ai_confidence,
+    compressed_ai_confidence,
+    detector_confidence_loss,
+    task_preservation_loss,
+    semantic_psnr_db,
+    semantic_ssim,
+    compressed_validation_ran,
+    detector_ran
     );
 
     write_text_file_local(output_path / "latest_validation.json", json);
@@ -306,6 +406,8 @@ int main(int argc, char** argv) {
         double cached_compressed_ai_confidence = 0.0;
         double cached_detector_confidence_loss = 0.0;
         double cached_ai_stability_loss = 0.0;
+        double cached_semantic_psnr_db = 0.0;
+        double cached_semantic_ssim = 0.0;
 
         ProcessMonitor process_monitor;
 
@@ -476,6 +578,32 @@ int main(int argc, char** argv) {
 
                 controller_output = rate_controller.update(controller_input);
 
+                double roi_area_budget = 0.55;
+
+                if (controller_output.controller_state == "sparse_idle") {
+                    roi_area_budget = 0.18;
+                } else if (controller_output.controller_state == "balanced") {
+                    roi_area_budget = 0.35;
+                } else if (controller_output.controller_state == "realtime_protect") {
+                    roi_area_budget = 0.32;
+                } else if (controller_output.controller_state == "dense_roi") {
+                    roi_area_budget = 0.38;
+                } else if (controller_output.controller_state == "dense_extreme") {
+                    roi_area_budget = 0.28;
+                } else if (controller_output.controller_state == "overload_low_fps") {
+                    roi_area_budget = 0.22;
+                }
+
+                roi_result = limit_rois_by_area_budget(
+                    roi_result,
+                    controller_output.max_rois,
+                    tuned_frame.width,
+                    tuned_frame.height,
+                    roi_area_budget
+                );
+
+                current_roi_area_ratio = roi_area_ratio(tuned_frame, roi_result);
+
                 int initial_roi_quality = controller_output.roi_quality;
                 int final_roi_quality = initial_roi_quality;
                 bool reencoded = false;
@@ -542,6 +670,12 @@ int main(int argc, char** argv) {
                     detection_event_write_this_frame ||
                     semantic_packet_write_this_frame;
 
+                double reference_ai_confidence = cached_reference_ai_confidence;
+                double compressed_ai_confidence = cached_compressed_ai_confidence;
+                double current_detector_confidence_loss = cached_detector_confidence_loss;
+                double semantic_psnr_db = cached_semantic_psnr_db;
+                double semantic_ssim = cached_semantic_ssim;
+
                 std::optional<Frame> final_reconstructed_frame;
 
                 if (need_reconstruction) {
@@ -556,7 +690,6 @@ int main(int argc, char** argv) {
                     decoded_packed_tile.tile_rows = roi_tile.tile_rows;
                     decoded_packed_tile.cell_width = roi_tile.cell_width;
                     decoded_packed_tile.cell_height = roi_tile.cell_height;
-
                     final_reconstructed_frame = reconstruct_semantic_frame(
                         decoded_context,
                         decoded_packed_tile,
@@ -569,11 +702,14 @@ int main(int argc, char** argv) {
                     semantic_reconstruct_ms = elapsed_ms(reconstruct_start, reconstruct_end);
                 }
 
-                StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
+                if (final_reconstructed_frame.has_value()) {
+                    semantic_psnr_db = compute_frame_psnr_db(tuned_frame, *final_reconstructed_frame);
+                    semantic_ssim = compute_frame_ssim(tuned_frame, *final_reconstructed_frame);
+                    cached_semantic_psnr_db = semantic_psnr_db;
+                    cached_semantic_ssim = semantic_ssim;
+                }
 
-                double reference_ai_confidence = cached_reference_ai_confidence;
-                double compressed_ai_confidence = cached_compressed_ai_confidence;
-                double current_detector_confidence_loss = cached_detector_confidence_loss;
+                StabilityResult stability = compute_roi_stability_loss(roi_tile.tile, roi_tile_jpeg);
 
                 if (compressed_validation_ran_this_frame && final_reconstructed_frame.has_value()) {
                     auto validation_start = std::chrono::steady_clock::now();
@@ -741,6 +877,8 @@ int main(int argc, char** argv) {
                         compressed_ai_confidence,
                         current_detector_confidence_loss,
                         stability.total_loss,
+                        semantic_psnr_db,
+                        semantic_ssim,
                         compressed_validation_ran_this_frame,
                         detector_ran_this_frame,
                         output_dir
@@ -836,6 +974,9 @@ int main(int argc, char** argv) {
                 metrics.reference_ai_confidence = reference_ai_confidence;
                 metrics.compressed_ai_confidence = compressed_ai_confidence;
                 metrics.detector_confidence_loss = current_detector_confidence_loss;
+                metrics.semantic_psnr_db = semantic_psnr_db;
+                metrics.semantic_ssim = semantic_ssim;
+                metrics.task_preservation_loss = stability.total_loss;
                 metrics.roi_quality = static_cast<std::uint32_t>(final_roi_quality);
                 metrics.context_quality = static_cast<std::uint32_t>(encode_result.context_quality);
                 metrics.context_width = static_cast<std::uint32_t>(context_frame.width);
@@ -877,7 +1018,7 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            std::this_thread::sleep_for(std::chrono::milliseconds(7));
         }
     });
 
