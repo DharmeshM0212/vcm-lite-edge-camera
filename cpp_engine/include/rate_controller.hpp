@@ -37,12 +37,12 @@ public:
 
 private:
     EngineConfig config_;
-    int last_roi_quality_;
-    int last_context_quality_;
-    int last_detector_interval_;
-    int last_context_width_;
-    int last_roi_cell_size_;
-    int last_max_rois_;
+    bool initialized_;
+    std::uint32_t previous_dropped_frames_;
 
-    int clamp_int(int value, int low, int high) const;
+    RateControllerOutput balanced_output(const RateControllerInput& input) const;
+    RateControllerOutput sparse_idle_output(const RateControllerInput& input) const;
+    RateControllerOutput realtime_protect_output(const RateControllerInput& input) const;
+    RateControllerOutput dense_roi_output(const RateControllerInput& input) const;
+    RateControllerOutput overload_output(const RateControllerInput& input) const;
 };
