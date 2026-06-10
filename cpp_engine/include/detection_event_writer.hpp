@@ -14,6 +14,8 @@ bool write_detection_event_snapshot(
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
-    double ai_stability_loss,
+    double task_preservation_loss,
+    double semantic_psnr_db,
+    double semantic_ssim,
     const std::string& output_dir
 );

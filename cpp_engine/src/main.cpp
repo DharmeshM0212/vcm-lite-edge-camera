@@ -921,6 +921,8 @@ int main(int argc, char** argv) {
                         compressed_ai_confidence,
                         current_detector_confidence_loss,
                         stability.total_loss,
+                        semantic_psnr_db,
+                        semantic_ssim,
                         output_dir
                     );
 

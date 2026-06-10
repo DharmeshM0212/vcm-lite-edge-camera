@@ -150,7 +150,9 @@ static std::string event_json(
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
-    double ai_stability_loss
+    double task_preservation_loss,
+    double semantic_psnr_db,
+    double semantic_ssim
 ) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(3);
@@ -164,7 +166,10 @@ static std::string event_json(
     ss << "\"reference_ai_confidence\":" << reference_ai_confidence << ",";
     ss << "\"compressed_ai_confidence\":" << compressed_ai_confidence << ",";
     ss << "\"detector_confidence_loss\":" << detector_confidence_loss << ",";
-    ss << "\"ai_stability_loss\":" << ai_stability_loss << ",";
+    ss << "\"task_preservation_loss\":" << task_preservation_loss << ",";
+    ss << "\"ai_stability_loss\":" << task_preservation_loss << ",";
+    ss << "\"semantic_psnr_db\":" << semantic_psnr_db << ",";
+    ss << "\"semantic_ssim\":" << semantic_ssim << ",";
     ss << "\"detector_used_dnn\":" << (detector_result.used_dnn ? "true" : "false") << ",";
     ss << "\"raw_candidate_count\":" << detector_result.raw_candidate_count << ",";
     ss << "\"max_raw_confidence\":" << detector_result.max_raw_confidence << ",";
@@ -221,7 +226,9 @@ bool write_detection_event_snapshot(
     double reference_ai_confidence,
     double compressed_ai_confidence,
     double detector_confidence_loss,
-    double ai_stability_loss,
+    double task_preservation_loss,
+    double semantic_psnr_db,
+    double semantic_ssim,
     const std::string& output_dir
 ) {
     if (detector_result.objects.empty()) {
@@ -269,7 +276,9 @@ bool write_detection_event_snapshot(
         reference_ai_confidence,
         compressed_ai_confidence,
         detector_confidence_loss,
-        ai_stability_loss
+        task_preservation_loss,
+        semantic_psnr_db,
+        semantic_ssim
     );
 
     write_text_file(output_path / "latest_detection_event.json", json);
