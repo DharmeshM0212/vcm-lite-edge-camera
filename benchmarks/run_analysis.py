@@ -43,6 +43,20 @@ def print_summary(summary: dict, label: str) -> None:
     print("average_semantic_psnr_db:", round(summary.get("average_semantic_psnr_db", 0.0), 3))
     print("average_semantic_ssim:", round(summary.get("average_semantic_ssim", 0.0), 4))
     print("average_roi_area_ratio:", round(summary.get("average_roi_area_ratio", 0.0), 4))
+
+    print("average_input_brightness:", round(summary.get("average_input_brightness", 0.0), 3))
+    print("average_output_brightness:", round(summary.get("average_output_brightness", 0.0), 3))
+    print("average_input_contrast:", round(summary.get("average_input_contrast", 0.0), 3))
+    print("average_output_contrast:", round(summary.get("average_output_contrast", 0.0), 3))
+    print("average_brightness_gain:", round(summary.get("average_brightness_gain", 0.0), 3))
+    print("average_gamma:", round(summary.get("average_gamma", 0.0), 3))
+    print("average_denoise_strength:", round(summary.get("average_denoise_strength", 0.0), 3))
+    print("average_sharpen_amount:", round(summary.get("average_sharpen_amount", 0.0), 3))
+    print("clahe_enabled_ratio:", round(summary.get("clahe_enabled_ratio", 0.0), 3))
+    print("average_isp_ms:", round(summary.get("average_isp_ms", 0.0), 3))
+    print("p95_isp_ms:", round(summary.get("p95_isp_ms", 0.0), 3))
+    print("isp_profile_counts:", summary.get("isp_profile_counts", {}))
+
     print("controller_state_counts:", summary.get("controller_state_counts", {}))
 
 
@@ -74,6 +88,11 @@ def plot_final_comparison(comparison_df: pd.DataFrame, output_dir: Path) -> None
         ("average_semantic_ssim", "Average Semantic SSIM by Scenario", "SSIM", "comparison_semantic_ssim.png"),
         ("average_roi_area_ratio", "Average ROI Area Ratio by Scenario", "ROI area ratio", "comparison_roi_area_ratio.png"),
         ("average_fps", "Average FPS by Scenario", "FPS", "comparison_fps.png"),
+        ("average_input_brightness", "Average Input Brightness by Scenario", "Brightness", "comparison_input_brightness.png"),
+        ("average_output_brightness", "Average Output Brightness by Scenario", "Brightness", "comparison_output_brightness.png"),
+        ("average_input_contrast", "Average Input Contrast by Scenario", "Contrast", "comparison_input_contrast.png"),
+        ("average_output_contrast", "Average Output Contrast by Scenario", "Contrast", "comparison_output_contrast.png"),
+        ("average_isp_ms", "Average ISP-Lite Runtime by Scenario", "ISP time (ms)", "comparison_isp_ms.png"),
     ]
 
     for column, title, ylabel, filename in metric_specs:
@@ -143,7 +162,7 @@ def main() -> None:
         analyze_final_runs(args.final_runs, args.output)
         return
 
-    summary = analyze_one(args.metrics, args.output, args.label)
+    analyze_one(args.metrics, args.output, args.label)
     print("")
     print("results:", args.output)
 

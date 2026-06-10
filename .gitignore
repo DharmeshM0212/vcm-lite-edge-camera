@@ -1,21 +1,31 @@
+cd "C:\Users\DHARMESH M\Documents\Projects\vcm-lite-edge-camera"
+
+@"
 .venv/
 __pycache__/
 *.pyc
 
+datasets/
+runs/
+
 cpp_engine/build/
 build/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.obj
+*.exe
 
 logs/
-outputs/
-benchmarks/results/
+outputs/latest_*
+outputs/*.jpg
+outputs/*.json
+outputs/*.jsonl
 
-models/*.onnx
 models/*.pt
+models/*.onnx
 
-webrtc_signaling/session.json
-
-assets/videos/demo/*.mp4
-assets/videos/demo/*.mov
-assets/videos/demo/*.avi
-assets/videos/demo/*.mkv
-assets/videos/demo/*.webm
+assets/videos/raw/
+assets/videos/downloads/
+"@ | Set-Content .gitignore
+benchmarks/final_runs/*/*.jsonl

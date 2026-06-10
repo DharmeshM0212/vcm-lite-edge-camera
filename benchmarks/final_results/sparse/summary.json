@@ -1,0 +1,116 @@
+{
+  "frames": 208,
+  "first_frame_id": 0,
+  "last_frame_id": 243,
+  "average_fps": 10.072302884615384,
+  "p95_fps": 13.659,
+  "average_latency_ms": 217.05677884615383,
+  "p95_latency_ms": 415.6689999999995,
+  "max_latency_ms": 866.874,
+  "average_bitrate_kbps": 741.2122067307693,
+  "p95_bitrate_kbps": 1563.2619499999992,
+  "max_bitrate_kbps": 2536.625,
+  "average_task_preservation_loss": 0.031067307692307693,
+  "p95_task_preservation_loss": 0.036,
+  "average_ai_stability_loss": 0.031067307692307693,
+  "average_semantic_psnr_db": 22.96425480769231,
+  "p95_semantic_psnr_db": 24.097,
+  "average_semantic_ssim": 0.9337403846153844,
+  "p95_semantic_ssim": 0.976,
+  "average_detector_confidence_loss": 0.018230769230769234,
+  "average_reference_ai_confidence": 0.6457596153846153,
+  "average_reconstructed_ai_confidence": 0.7812451923076923,
+  "average_roi_count": 2.0865384615384617,
+  "average_roi_area_ratio": 0.2106009615384615,
+  "p95_roi_area_ratio": 0.5343,
+  "average_roi_quality": 57.21634615384615,
+  "average_context_quality": 17.278846153846153,
+  "average_context_width": 176.34615384615384,
+  "average_roi_tile_width": 267.3076923076923,
+  "average_total_encoded_bytes": 8875.33173076923,
+  "average_input_brightness": 110.99211057692308,
+  "average_output_brightness": 110.81206730769233,
+  "average_brightness_gain": 0.951298076923077,
+  "average_input_contrast": 53.55868269230769,
+  "average_output_contrast": 57.799524038461534,
+  "average_contrast_alpha": 1.0332692307692306,
+  "average_contrast_beta": 0.0,
+  "average_gamma": 0.9619278846153847,
+  "average_denoise_strength": 0.013322115384615384,
+  "average_sharpen_amount": 0.17940865384615387,
+  "clahe_enabled_ratio": 0.03365384615384615,
+  "average_isp_ms": 49.35645673076923,
+  "p95_isp_ms": 55.29139999999999,
+  "max_isp_ms": 621.17,
+  "isp_profile_counts": {
+    "normal": 34,
+    "soft_frame_rt": 71,
+    "normal_rt": 44,
+    "soft_frame": 22,
+    "low_contrast_rt_ai_protect": 1,
+    "low_contrast_rt": 29,
+    "low_contrast": 7
+  },
+  "final_dropped_frames": 36,
+  "max_queue_depth": 3,
+  "reencoded_frames": 0,
+  "detector_ran_frames": 8,
+  "dnn_frames": 208,
+  "controller_state_counts": {
+    "overload_low_fps": 135,
+    "dense_roi": 37,
+    "dense_extreme": 23,
+    "balanced": 11,
+    "realtime_protect": 2
+  },
+  "mode_counts": {
+    "dnn_detector": 208
+  },
+  "timing_ms": {
+    "queue_wait_ms": {
+      "avg": 129.86449038461538,
+      "p95": 218.48829999999992,
+      "max": 521.825
+    },
+    "processing_ms": {
+      "avg": 87.19234134615385,
+      "p95": 117.90699999999977,
+      "max": 827.405
+    },
+    "isp_ms": {
+      "avg": 49.35645673076923,
+      "p95": 55.29139999999999,
+      "max": 621.17
+    },
+    "motion_roi_ms": {
+      "avg": 7.999836538461539,
+      "p95": 10.750449999999995,
+      "max": 16.282
+    },
+    "detector_ms": {
+      "avg": 10.860100961538462,
+      "p95": 0.0,
+      "max": 356.418
+    },
+    "semantic_encode_ms": {
+      "avg": 7.1543413461538465,
+      "p95": 11.74945,
+      "max": 39.508
+    },
+    "semantic_reconstruct_ms": {
+      "avg": 0.1736778846153846,
+      "p95": 0.0,
+      "max": 4.63
+    },
+    "compressed_validation_ms": {
+      "avg": 4.6511394230769225,
+      "p95": 0.0,
+      "max": 399.004
+    },
+    "event_write_ms": {
+      "avg": 0.2195,
+      "p95": 0.0,
+      "max": 17.406
+    }
+  }
+}

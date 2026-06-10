@@ -1,0 +1,37 @@
+{
+  "frames": 371,
+  "first_frame_id": 0,
+  "last_frame_id": 380,
+  "average_fps": 5.1419865229110515,
+  "average_latency_ms": 141.00903504043126,
+  "p95_latency_ms": 328.33349999999996,
+  "max_latency_ms": 1125.973,
+  "average_bitrate_kbps": 558.857064690027,
+  "p95_bitrate_kbps": 820.62,
+  "average_ai_stability_loss": 0.036592991913746625,
+  "p95_ai_stability_loss": 0.043,
+  "average_detector_confidence_loss": 0.03153638814016172,
+  "average_reference_ai_confidence": 0.5522237196765498,
+  "average_compressed_ai_confidence": 0.48758760107816723,
+  "average_roi_count": 2.9973045822102424,
+  "average_roi_area_ratio": 0.2423908355795148,
+  "average_roi_quality": 60.39083557951483,
+  "average_context_quality": 19.126684636118597,
+  "average_context_width": 203.1266846361186,
+  "average_roi_tile_width": 309.7789757412399,
+  "final_dropped_frames": 10,
+  "max_queue_depth": 3,
+  "reencoded_frames": 0,
+  "detector_ran_frames": 13,
+  "dnn_frames": 371,
+  "controller_state_counts": {
+    "balanced": 3,
+    "overload_low_fps": 61,
+    "dense_roi": 220,
+    "realtime_protect": 84,
+    "dense_extreme": 3
+  },
+  "mode_counts": {
+    "dnn_detector": 371
+  }
+}

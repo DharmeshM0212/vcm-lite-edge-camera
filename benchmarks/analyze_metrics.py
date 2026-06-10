@@ -91,6 +91,13 @@ def count_true(df: pd.DataFrame, column: str) -> int:
     return int(df[column].astype(bool).sum())
 
 
+def true_ratio(df: pd.DataFrame, column: str) -> float:
+    if column not in df.columns or df.empty:
+        return 0.0
+
+    return float(df[column].astype(bool).mean())
+
+
 def task_loss_column(df: pd.DataFrame) -> str:
     if "task_preservation_loss" in df.columns:
         return "task_preservation_loss"
@@ -111,20 +118,18 @@ def timing_summary(df: pd.DataFrame, columns: list[str]) -> dict[str, Any]:
     return output
 
 
+def profile_counts(df: pd.DataFrame, column: str) -> dict[str, int]:
+    if column not in df.columns or df.empty:
+        return {}
+
+    return dict(Counter(df[column].astype(str).tolist()))
+
+
 def summarize_metrics(df: pd.DataFrame) -> dict[str, Any]:
     if df.empty:
         return {"frames": 0}
 
     loss_column = task_loss_column(df)
-
-    controller_counts = {}
-    mode_counts = {}
-
-    if "controller_state" in df.columns:
-        controller_counts = dict(Counter(df["controller_state"].astype(str).tolist()))
-
-    if "mode" in df.columns:
-        mode_counts = dict(Counter(df["mode"].astype(str).tolist()))
 
     timing_columns = [
         "queue_wait_ms",
@@ -142,24 +147,31 @@ def summarize_metrics(df: pd.DataFrame) -> dict[str, Any]:
         "frames": int(len(df)),
         "first_frame_id": int(df["frame_id"].iloc[0]) if "frame_id" in df.columns else 0,
         "last_frame_id": int(df["frame_id"].iloc[-1]) if "frame_id" in df.columns else 0,
+
         "average_fps": safe_mean(df, "fps"),
         "p95_fps": safe_percentile(df, "fps", 0.95),
+
         "average_latency_ms": safe_mean(df, "latency_ms"),
         "p95_latency_ms": safe_percentile(df, "latency_ms", 0.95),
         "max_latency_ms": safe_max(df, "latency_ms"),
+
         "average_bitrate_kbps": safe_mean(df, "bitrate_kbps"),
         "p95_bitrate_kbps": safe_percentile(df, "bitrate_kbps", 0.95),
         "max_bitrate_kbps": safe_max(df, "bitrate_kbps"),
+
         "average_task_preservation_loss": safe_mean(df, loss_column),
         "p95_task_preservation_loss": safe_percentile(df, loss_column, 0.95),
         "average_ai_stability_loss": safe_mean(df, "ai_stability_loss"),
+
         "average_semantic_psnr_db": safe_mean_positive(df, "semantic_psnr_db"),
         "p95_semantic_psnr_db": safe_percentile_positive(df, "semantic_psnr_db", 0.95),
         "average_semantic_ssim": safe_mean_positive(df, "semantic_ssim"),
         "p95_semantic_ssim": safe_percentile_positive(df, "semantic_ssim", 0.95),
+
         "average_detector_confidence_loss": safe_mean(df, "detector_confidence_loss"),
         "average_reference_ai_confidence": safe_mean(df, "reference_ai_confidence"),
         "average_reconstructed_ai_confidence": safe_mean(df, "compressed_ai_confidence"),
+
         "average_roi_count": safe_mean(df, "roi_count"),
         "average_roi_area_ratio": safe_mean(df, "roi_area_ratio"),
         "p95_roi_area_ratio": safe_percentile(df, "roi_area_ratio", 0.95),
@@ -168,13 +180,31 @@ def summarize_metrics(df: pd.DataFrame) -> dict[str, Any]:
         "average_context_width": safe_mean(df, "context_width"),
         "average_roi_tile_width": safe_mean(df, "roi_tile_width"),
         "average_total_encoded_bytes": safe_mean(df, "total_encoded_bytes"),
+
+        "average_input_brightness": safe_mean(df, "input_brightness"),
+        "average_output_brightness": safe_mean(df, "mean_brightness"),
+        "average_brightness_gain": safe_mean(df, "brightness_gain"),
+        "average_input_contrast": safe_mean(df, "input_contrast"),
+        "average_output_contrast": safe_mean(df, "output_contrast"),
+        "average_contrast_alpha": safe_mean(df, "contrast_alpha"),
+        "average_contrast_beta": safe_mean(df, "contrast_beta"),
+        "average_gamma": safe_mean(df, "gamma"),
+        "average_denoise_strength": safe_mean(df, "denoise_strength"),
+        "average_sharpen_amount": safe_mean(df, "sharpen_amount"),
+        "clahe_enabled_ratio": true_ratio(df, "clahe_enabled"),
+        "average_isp_ms": safe_mean(df, "isp_ms"),
+        "p95_isp_ms": safe_percentile(df, "isp_ms", 0.95),
+        "max_isp_ms": safe_max(df, "isp_ms"),
+        "isp_profile_counts": profile_counts(df, "isp_profile"),
+
         "final_dropped_frames": int(safe_max(df, "dropped_frames")),
         "max_queue_depth": int(safe_max(df, "queue_depth")),
         "reencoded_frames": count_true(df, "reencoded"),
         "detector_ran_frames": count_true(df, "detector_ran"),
         "dnn_frames": count_true(df, "detector_used_dnn"),
-        "controller_state_counts": controller_counts,
-        "mode_counts": mode_counts,
+
+        "controller_state_counts": profile_counts(df, "controller_state"),
+        "mode_counts": profile_counts(df, "mode"),
         "timing_ms": timing_summary(df, timing_columns),
     }
 
