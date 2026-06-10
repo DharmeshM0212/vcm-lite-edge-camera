@@ -23,7 +23,7 @@ outputs/*.json
 outputs/*.jsonl
 
 models/*.pt
-models/*.onnx
+
 
 assets/videos/raw/
 assets/videos/downloads/
