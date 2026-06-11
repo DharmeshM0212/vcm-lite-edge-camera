@@ -785,7 +785,7 @@ The dashboard is useful because it shows not only final benchmark values, but al
 
 ### Dense traffic dashboard
 
-![Dense traffic dashboard overview](docs/images/dense_1.png)
+![Dense traffic dashboard overview](outputs/dashboard/dense_1.pngdense_1.png)
 
 In the dense traffic dashboard, the scene contains multiple vehicle ROIs and the controller enters `dense_roi`. The reconstructed semantic frame keeps the important vehicles visible and detectable while simplifying background details.
 
@@ -793,11 +793,11 @@ The ROI crop shows the highest-value object region selected by the task pipeline
 
 ### Night stress dashboard
 
-![Night stress dashboard overview](docs/images/night_1.png)
+![Night stress dashboard overview](outputs/dashboard/night_1.png)
 
-![Night stress dashboard validation](docs/images/night_2.png)
+![Night stress dashboard validation](outputs/dashboard/night_2.png)
 
-![Night stress dashboard controller and ISP](docs/images/night_3.png)
+![Night stress dashboard controller and ISP](outputs/dashboard/night_3.png)
 
 The night stress dashboard shows the most difficult case. The scene has low-light conditions, glare, and weaker object evidence. The pipeline still detects the vehicle ROI and reconstructs the vehicle area, while less important frame details such as timestamp-like overlays are not preserved because they are not useful for the vehicle task.
 
