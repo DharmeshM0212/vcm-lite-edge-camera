@@ -785,7 +785,7 @@ The dashboard is useful because it shows not only final benchmark values, but al
 
 ### Dense traffic dashboard
 
-![Dense traffic dashboard overview](outputs/dashboard/dense_1.pngdense_1.png)
+![Dense traffic dashboard overview](outputs/dashboard/dense_1.png)
 
 In the dense traffic dashboard, the scene contains multiple vehicle ROIs and the controller enters `dense_roi`. The reconstructed semantic frame keeps the important vehicles visible and detectable while simplifying background details.
 
@@ -805,7 +805,7 @@ The controller enters `overload_low_fps` because detector and validation cost ar
 
 ### Short night stress clip
 
-![Short night stress dashboard overview](docs/images/night_short_1.png)
+![Short night stress dashboard overview](outputs/dashboard/night_short_1.png)
 
 This screenshot shows the short night clip used to stress low-light operation. The reconstruction preserves the car ROI and discards non-task details. This is a useful example of task-aware compression: the goal is not to preserve every pixel, but to preserve object evidence that matters to the machine task.
 
