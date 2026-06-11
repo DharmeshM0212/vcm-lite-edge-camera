@@ -29,3 +29,8 @@ assets/videos/raw/
 assets/videos/downloads/
 "@ | Set-Content .gitignore
 benchmarks/final_runs/*/*.jsonl
+@"
+
+outputs/
+logs/
+"@ | Add-Content .gitignore
