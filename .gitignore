@@ -34,3 +34,7 @@ benchmarks/final_runs/*/*.jsonl
 outputs/
 logs/
 "@ | Add-Content .gitignore
+
+outputs/*
+!outputs/dashboard/
+!outputs/dashboard/*.png
